@@ -1,0 +1,35 @@
+body {
+  font-size: 18px;
+}
+
+.ascend-editor {
+  position: relative;
+  border: 1px solid black;
+}
+
+.ascend-editor-cursor {
+  width: 1px;
+  height: 1em;
+  background: black;
+  position: absolute;
+}
+
+.ascend-editor-code {
+  position: relative;
+  white-space: pre;
+  overflow: auto;
+  min-height: 140px;
+  width: 100%;
+  font-family: monospace;
+  padding: 0.4em;
+}
+
+.ascend-editor div {
+  height: 1em;
+  min-width: 1px;
+}
+
+.ascend-editor-selected {
+  background-color: #add8e6 !important;
+  color: #959595 !important;
+}
