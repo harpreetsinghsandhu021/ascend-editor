@@ -34,3 +34,24 @@ export function positionEqual(a: Position, b: Position): boolean {
 export function positionLess(a: Position, b: Position): boolean {
   return a.line < b.line || (a.line === b.line && a.ch < b.ch);
 }
+
+export function htmlEscape(str: string): string {
+  return str.replace(/[<&]/g, (str) => (str === "&" ? "&amp;" : "&lt;"));
+}
+
+/**
+ * Creates a copy of a parser state object.
+ * @param state  - The parser state object to copy
+ */
+export function copyState(state: any) {
+  if (state.copy) return state.copy();
+
+  const nState: { [key: string]: any } = {};
+  for (const n in state) {
+    let val = state[n];
+    if (val instanceof Array) val = val.concat([]);
+    nState[n] = val;
+  }
+
+  return nState;
+}

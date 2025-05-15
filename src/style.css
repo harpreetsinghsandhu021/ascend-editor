@@ -9,8 +9,9 @@ body {
 
 .ascend-editor-cursor {
   width: 1px;
-  height: 1em;
+  height: 1.2em;
   background: black;
+  margin-top: -0.1em;
   position: absolute;
 }
 
@@ -20,6 +21,7 @@ body {
   overflow: auto;
   min-height: 140px;
   width: 100%;
+  line-height: 1em;
   font-family: monospace;
   padding: 0.4em;
 }
