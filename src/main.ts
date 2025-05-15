@@ -1,29 +1,36 @@
 import "./style.css";
+import "./mode/javascript/index.ts";
+import "./mode/javascript/index.css";
 import type { Position } from "./interfaces";
 import { AsEvent, connect } from "./utils/events";
 import { addTextSpan, removeElement } from "./utils/dom";
 import {
+  copyState,
   eltOffset,
+  htmlEscape,
   keyCodeMap,
   movementKeys,
   positionEqual,
   positionLess,
 } from "./utils/helpers";
+import { StringStream, type TokenizeFn } from "./parsers/stringStream";
+import { javascriptParser } from "./mode/javascript/index.ts";
 
 interface EditorOptions {
   value?: string;
+  parser?: any;
 }
 
-class AscendEditor {
+export class AscendEditor {
   div: HTMLDivElement;
   input: HTMLTextAreaElement;
   code: HTMLDivElement;
   cursor: HTMLDivElement;
   measure: HTMLSpanElement;
-  lines: Array<{ div: HTMLDivElement; text: string; tokens: null }>;
+  lines: Array<{ div: HTMLDivElement; text: string; stateAfter: any }>;
   selection: { from: Position; to: Position; inverted?: boolean };
   prevSelection: { from: Position; to: Position };
-  focused: boolean;
+  focused: boolean = false;
   editing: {
     text: string;
     from: number;
@@ -33,8 +40,18 @@ class AscendEditor {
   };
   shiftSelecting: Position | null;
   reducedSelection: { anchor: number } | null;
-  pollTimer: number | null;
-  blinker: number | null;
+  pollTimer: number | null = null;
+  blinker: number | null = null;
+  work: number[] = []; // Array of line numbers to be highlighted
+  static parsers: { [name: string]: any } = {};
+  static defaultParser: string | null = null;
+  static addParser(name: string, parser: any) {
+    if (!AscendEditor.defaultParser) AscendEditor.defaultParser = name;
+    AscendEditor.parsers[name] = parser;
+  }
+  // TODO: Change the type of parser
+  parser: any; // The parser for syntax highlighting
+  highlightTimeout: number | null = null;
 
   constructor(place: HTMLElement, options: EditorOptions) {
     const div = (this.div = place.appendChild(document.createElement("div")));
@@ -46,7 +63,7 @@ class AscendEditor {
     textarea.style.position = "absolute";
     textarea.style.width = "10000px";
     textarea.style.top = "20em";
-    textarea.style.height = "14em";
+    textarea.style.height = "10em";
     textarea.style.fontSize = "18px";
 
     const code = (this.code = div.appendChild(document.createElement("div")));
@@ -61,6 +78,10 @@ class AscendEditor {
     this.measure.style.position = "absolute";
     this.measure.style.visibility = "hidden";
     this.measure.innerHTML = "-";
+
+    this.parser =
+      AscendEditor.parsers[options.parser || AscendEditor.defaultParser];
+    if (!this.parser) throw new Error("No parser found");
 
     this.lines = [];
     this.setValue(options.value || "");
@@ -111,9 +132,7 @@ class AscendEditor {
       this.onBlur();
     }
 
-    this.blinker = null;
     this.shiftSelecting = zero;
-    this.focused = false;
     this.editing = {
       text: "",
       start: 0,
@@ -122,7 +141,6 @@ class AscendEditor {
       to: 0,
     };
     this.reducedSelection = { anchor: 0 };
-    this.pollTimer = null;
   }
 
   setValue(code: string) {
@@ -154,8 +172,6 @@ class AscendEditor {
       this.div,
       "mousemove",
       function (e) {
-        console.log(e);
-
         // Get the current cursor position based om the mouse event
         let curr = self.clipPosition(self.mouseEventPos(e));
 
@@ -185,7 +201,7 @@ class AscendEditor {
 
     const leave = connect(
       this.div,
-      "mouseleave",
+      "mouseout",
       function (e) {
         if (e.target() === self.div) end();
       },
@@ -228,8 +244,11 @@ class AscendEditor {
       // If the number of lines is greater than existing lines
     } else if (lenDiff > 0) {
       // Prepare the arguments for splicing new lines into this.lines
-      const spliceArgs: { div: HTMLDivElement; text: string; tokens: null }[] =
-        [];
+      const spliceArgs: {
+        div: HTMLDivElement;
+        text: string;
+        stateAfter: null;
+      }[] = [];
       const before = this.lines[from] ? this.lines[from].div : null;
 
       // Insert new DIVs before the DIV at the `from` index
@@ -239,7 +258,7 @@ class AscendEditor {
           before
         );
         // Add empty lines to the splice arguments
-        spliceArgs.push({ div, text: "", tokens: null });
+        spliceArgs.push({ div, text: "", stateAfter: null });
       }
       this.lines.splice.apply(this.lines, [from, 0, ...spliceArgs]);
     }
@@ -248,10 +267,24 @@ class AscendEditor {
     for (let i = 0, l = newText.length; i < l; i++) {
       const line = this.lines[from + i];
       const text = (line.text = newText[i]);
-      line.tokens = null;
+      line.stateAfter = null;
       line.div.innerHTML = "";
       addTextSpan(line.div, line.text);
     }
+
+    let newWork = [];
+    for (let i = 0; i < this.work.length; i++) {
+      let task = this.work[i];
+      if (task < from) {
+        newWork.push(task);
+      } else if (task >= to) {
+        newWork.push(task + lenDiff);
+      }
+    }
+
+    if (newText.length) newWork.push(from);
+    this.work = newWork;
+    this.startWorker(100);
   }
 
   onDrop(e: AsEvent) {
@@ -273,7 +306,7 @@ class AscendEditor {
   onKeyUp(e: AsEvent) {
     if (this.reducedSelection) {
       this.reducedSelection = null;
-      this.readInput();
+      this.prepareInputArea();
     }
 
     if ((e.e as KeyboardEvent).shiftKey) {
@@ -314,7 +347,7 @@ class AscendEditor {
       // Handle other keys
       let id = (ctrl ? "c" : "") + key;
 
-      if (this.shiftSelecting && this.selection.inverted && movementKeys[id]) {
+      if (this.selection.inverted && movementKeys[id]) {
         this.reducedSelection = { anchor: this.input.selectionStart };
         this.input.selectionEnd = this.input.selectionStart;
       }
@@ -422,12 +455,13 @@ class AscendEditor {
     // Handle reduced selection cases
     if (rs) {
       from = selStart == rs.anchor ? to : from;
-      to = sel.to;
+      to = this.shiftSelecting ? sel.to : selStart == rs.anchor ? from : to;
 
       if (!positionLess(from, to)) {
         this.reducedSelection = null;
-        to = from;
-        from = sel.to;
+        let temp = from;
+        from = to;
+        to = temp;
       }
     }
 
@@ -439,6 +473,7 @@ class AscendEditor {
     if (!movedLine) {
       ed.start = selStart;
       ed.end = selEnd;
+      ed.text = text;
     }
 
     // If the text has changed, update the editor's lines.
@@ -761,7 +796,86 @@ class AscendEditor {
     this.input.selectionStart = startCh;
   }
 
-  setSelectedStyle(lineNo: number, start: number, end: number) {
+  /**
+   * Highlights a single line of code
+   * @param line - Line object
+   * @param state - The current state of the parser, used to determine the syntax highlighting styles
+   */
+  highLightLine(line: { text: string; div: HTMLElement }, state: any) {
+    const stream = new StringStream(line.text);
+
+    const html: string[] = []; // array to store HTML segements
+
+    // Loop through the line text
+    while (!stream.done()) {
+      // Get the starting position of the current token
+      const start = stream.pos;
+      // Get the syntax highlighting style for the current token
+      const style = this.parser.token(stream, state, start === 0);
+
+      // Extract the token text from the line
+      const str = line.text.slice(start, stream.pos);
+      // Append the token text wrapped in a span with the appropriate with appropriate style class
+      html.push(`<span class="${style}">${htmlEscape(str)}</span>`);
+    }
+
+    // Update the line's HTML element with the highlighted content
+    line.div.innerHTML = html.join("");
+  }
+
+  /**
+   * Continuously highlights lines in the background
+   * @param start
+   */
+  highlightWorker(start?: number) {
+    const end = Number(new Date()) + 200; // time limit for highlighting
+
+    // Loop through the work queue
+    while (this.work.length) {
+      let task = this.work.pop()!;
+      // Skip lines that have already been highlighted
+      if (this.lines[task].stateAfter) continue;
+
+      let state: any;
+
+      if (task) {
+        // Get the state from the previous line
+        state = this.lines[task - 1].stateAfter;
+        if (!state) continue;
+        state = copyState(state);
+      } else {
+        // Start with the initial parser state
+        state = this.parser.startState();
+      }
+
+      for (let i = task; i < this.lines.length; i++) {
+        const line = this.lines[i];
+
+        if (line.stateAfter) break;
+
+        // If the time limit has been reached, reschedule the remaining
+        if (Number(new Date()) > end) {
+          this.work.push(i);
+          this.startWorker(300);
+          return;
+        }
+
+        // Highlight the current line and update its state
+        this.highLightLine(line, state);
+        line.stateAfter = copyState(state);
+      }
+    }
+  }
+
+  // Start the background highlighting worker
+  startWorker(time: number) {
+    if (!this.work.length) return;
+    const self = this;
+    clearTimeout(this.highlightTimeout!);
+    this.highlightTimeout = setTimeout(() => self.highlightWorker(), time);
+  }
+
+  setSelectedStyle(lineNo: number, start: number, end: number | null) {
     const line = this.lines[lineNo];
     if (!line.text) return;
 
@@ -813,12 +927,8 @@ class AscendEditor {
   }
 }
 
-const editor = new AscendEditor(document.getElementById("code")!, {
-  value: `function hello() {
-    console.log("Hello, world!")
-    return 42;
-    }
+AscendEditor.addParser("javascript", javascriptParser);
 
-    // Try typing and editing this code
-    // The editor supports basic text editing functionality`,
+const editor = new AscendEditor(document.getElementById("code")!, {
+  value: `function foo(a, b) {\n  var x = '100' + a;\n  return b ? x : 22.4;\n}\n`,
 });
