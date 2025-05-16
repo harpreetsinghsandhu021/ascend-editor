@@ -5,6 +5,7 @@ import type { Position } from "./interfaces";
 import { AsEvent, connect } from "./utils/events";
 import { addTextSpan, removeElement } from "./utils/dom";
 import {
+  copyPosition,
   copyState,
   eltOffset,
   htmlEscape,
@@ -27,7 +28,12 @@ export class AscendEditor {
   code: HTMLDivElement;
   cursor: HTMLDivElement;
   measure: HTMLSpanElement;
-  lines: Array<{ div: HTMLDivElement; text: string; stateAfter: any }>;
+  lines: Array<{
+    div: HTMLDivElement;
+    text: string;
+    stateAfter: any;
+    selDiv: any;
+  }>;
   selection: { from: Position; to: Position; inverted?: boolean };
   prevSelection: { from: Position; to: Position };
   focused: boolean = false;
@@ -144,7 +150,7 @@ export class AscendEditor {
   }
 
   setValue(code: string) {
-    this.updateLines(0, this.lines.length, code.split(/\r?\n/g));
+    this.replaceLines(0, this.lines.length, code.split(/\r?\n/g));
   }
 
   /**
@@ -229,7 +235,7 @@ export class AscendEditor {
    * @param to - The ending line index to update
    * @param newText - Array of strings representing the new text content for each line
    */
-  updateLines(from: number, to: number, newText: string[]) {
+  replaceLines(from: number, to: number, newText: string[]) {
     // Calculate the difference in number of lines b/w old and new content
     const lenDiff = newText.length - (to - from);
 
@@ -238,7 +244,7 @@ export class AscendEditor {
       // Remove the extra lines from this.lines and their corresponding DIVs
       const removed = this.lines.splice(from, -lenDiff);
       for (let i = 0, l = removed.length; i < l; i++) {
-        removeElement(removed[i].div);
+        removeElement(removed[i].selDiv || removed[i].div);
       }
 
       // If the number of lines is greater than existing lines
@@ -248,6 +254,7 @@ export class AscendEditor {
         div: HTMLDivElement;
         text: string;
         stateAfter: null;
+        selDiv: null;
       }[] = [];
       const before = this.lines[from] ? this.lines[from].div : null;
 
@@ -258,7 +265,7 @@ export class AscendEditor {
           before
         );
         // Add empty lines to the splice arguments
-        spliceArgs.push({ div, text: "", stateAfter: null });
+        spliceArgs.push({ div, text: "", stateAfter: null, selDiv: null });
       }
       this.lines.splice.apply(this.lines, [from, 0, ...spliceArgs]);
     }
@@ -267,7 +274,9 @@ export class AscendEditor {
     for (let i = 0, l = newText.length; i < l; i++) {
       const line = this.lines[from + i];
       const text = (line.text = newText[i]);
+      if (line.selDiv) this.code.replaceChild(line.div, line.selDiv);
       line.stateAfter = null;
+      line.selDiv = null;
       line.div.innerHTML = "";
       addTextSpan(line.div, line.text);
     }
@@ -339,6 +348,12 @@ export class AscendEditor {
       e.stop();
       //
       // Handle shift key (for shift selecting)
+    } else if (!ctrl && key === "Enter") {
+      this.insertNewLine();
+      e.stop();
+    } else if (!ctrl && key === "Tab") {
+      this.handleTab();
+      e.stop();
     } else if (key === "Shift") {
       this.shiftSelecting = this.selection.inverted
         ? this.selection.to
@@ -387,7 +402,7 @@ export class AscendEditor {
       }
 
       // If a state change occured or this is the first missed poll, reschedule the poll
-      if (state || (!missed && (missed = true))) {
+      if (state) {
         self.schedulePoll(200, key);
       } else {
         // Otherwise, schedule a regular poll after a longer delay.
@@ -440,11 +455,20 @@ export class AscendEditor {
 
     // Computes the line and character position from an offset.
     function computeOffset(n: number, startLine: number) {
-      for (var i = 0; ; i++) {
-        let ll = lines[i].length;
-        if (n <= ll) return { line: startLine, ch: n };
+      // for (var i = 0; ; i++) {
+      //   let ll = lines[i].length;
+      //   if (n <= ll) return { line: startLine, ch: n };
+      //   startLine++;
+      //   n -= ll + 1;
+      // }
+      let pos = 0;
+      while (true) {
+        let found = text.indexOf("\n", pos);
+        if (found == -1 || found >= n) {
+          return { line: startLine, ch: n - pos };
+        }
         startLine++;
-        n -= ll + 1;
+        pos = found + 1;
       }
     }
 
@@ -501,7 +525,7 @@ export class AscendEditor {
       }
 
       // Update the editor's lines with the remaining lines.
-      this.updateLines(editStart, editEnd, lines);
+      this.replaceLines(editStart, editEnd, lines);
     }
 
     // Update the selection based on new start and end positions.
@@ -568,41 +592,41 @@ export class AscendEditor {
         ) {
           this.removeSelectedStyle(i);
         }
+      }
 
-        // If the selection is on the same line
-        if (sel.from.line === sel.to.line) {
-          // Apply the selected style to the range on that line
-          this.setSelectedStyle(sel.from.line, sel.from.ch, sel.to.ch);
-        } else {
-          // Apply the selected style to the beginning of the first line
-          this.setSelectedStyle(sel.from.line, sel.from.ch, null);
+      // If the selection is on the same line
+      if (sel.from.line == sel.to.line) {
+        // Apply the selected style to the range on that line
+        this.setSelectedStyle(sel.from.line, sel.from.ch, sel.to.ch);
+      } else {
+        // Apply the selected style to the beginning of the first line
+        this.setSelectedStyle(sel.from.line, sel.from.ch, null);
 
-          // Apply the selected style to all lines in between
-          for (let i = sel.from.line + 1; i < sel.to.line; i++) {
-            this.setSelectedStyle(i, 0, null);
-          }
-
-          // Apply the selected style to the end of the last line
-          this.setSelectedStyle(sel.to.line, 0, sel.to.ch);
+        // Apply the selected style to all lines in between
+        for (let i = sel.from.line + 1; i < sel.to.line; i++) {
+          this.setSelectedStyle(i, 0, null);
         }
+
+        // Apply the selected style to the end of the last line
+        this.setSelectedStyle(sel.to.line, 0, sel.to.ch);
       }
+    }
 
-      // Update the previous selection range with the current selection
-      pr.from = sel.from;
-      pr.to = sel.to;
+    // Update the previous selection range with the current selection
+    pr.from = sel.from;
+    pr.to = sel.to;
 
-      // Calculate the vertical position of the selection's first line
-      let yPos = this.lines[sel.from.line].div.offsetTop;
-      let line = this.lineHeight();
-      let screen = this.code.clientHeight;
-      let screenTop = this.code.scrollTop;
+    // Calculate the vertical position of the selection's first line
+    let yPos = this.lines[sel.from.line].div.offsetTop;
+    let line = this.lineHeight();
+    let screen = this.code.clientHeight;
+    let screenTop = this.code.scrollTop;
 
-      // Scroll the code area vertically to ensure the selection is visible
-      if (yPos < screenTop) {
-        this.code.scrollTop = Math.max(0, yPos - 0);
-      } else if (yPos + line > screenTop + screen) {
-        this.code.scrollTop = yPos + line + 10 - screen;
-      }
+    // Scroll the code area vertically to ensure the selection is visible
+    if (yPos < screenTop) {
+      this.code.scrollTop = Math.max(0, yPos - 0);
+    } else if (yPos + line > screenTop + screen) {
+      this.code.scrollTop = yPos + line + 10 - screen;
     }
   }
 
@@ -733,23 +757,113 @@ export class AscendEditor {
     if (updateInput !== false) this.prepareInputArea();
   }
 
-  replaceSelection(code: string) {
+  replaceSelection(
+    code: string,
+    updateInput?: boolean,
+    collapse?: "start" | "end"
+  ) {
     const lines = code.split(/\r?\n/g);
-
     let sel = this.selection;
 
+    // Prepend the text before the selection start to the first new line
     lines[0] = this.lines[sel.from.line].text.slice(0, sel.from.ch) + lines[0];
 
-    let endCh = lines[0].length;
+    // Store the character position at the end of the newly inserted last line before appending the rest of the orgiinal line.
+    // This is where the cursor will be if not collapsed.
+    let endCh = lines[lines.length - 1].length;
 
+    // Append the text after the selection end from from the original line to the last new line
     lines[lines.length - 1] += this.lines[sel.to.line].text.slice(sel.to.ch);
 
-    this.updateLines(sel.from.line, sel.to.line + 1, lines);
+    // Replace the selected line with the new lines
+    this.replaceLines(sel.from.line, sel.to.line + 1, lines);
 
-    this.setSelection(sel.from, {
+    // Determine the final 'from' and 'to' positions for the selection after replacement
+    let finalFromPos: Position = sel.from;
+
+    let finalToPos: Position = {
       line: sel.from.line + lines.length - 1,
       ch: endCh,
-    });
+    };
+
+    if (collapse === "end") {
+      // If collapse is "end", move the cursor (both from and to) to the end of the inserted text
+      finalFromPos = finalToPos;
+    } else if (collapse === "start") {
+      // If collapse is "start", move the cursor (both from and to) to the start of the inserted text
+      finalToPos = finalFromPos;
+    }
+
+    this.setSelection(finalFromPos, finalToPos, updateInput);
+  }
+
+  /**
+   * Inserts a newline character at the current selection point. It replaces the current selectoion with a newline character.
+   * After inserting the newline, it attempts to indent the newly created line.
+   */
+  insertNewLine() {
+    this.replaceSelection("\n", false, "end");
+    if (!this.indentLine(this.selection.from.line)) {
+      this.prepareInputArea();
+    }
+  }
+
+  /**
+   * Handles the Tab key press.
+   * Iterates through each line within the current selectionr range and calls indentLine on each line to properly indent it.
+   */
+  handleTab() {
+    let sel = this.selection;
+    for (let i = sel.from.line; i <= sel.to.line; i++) {
+      this.indentLine(i);
+    }
+  }
+
+  /**
+   * Idents a specific line based on the parser's indentation rules.
+   * @param n - THe line number to indent (0-based index)
+   */
+  indentLine(n: number) {
+    // Retrieve the parser state before the specified line.
+    let state = this.getStateBefore(n);
+    if (!state) return;
+
+    let text = this.lines[n].text;
+    // Determines the current amount of whitespace at the beginning of the line.
+    let currSpace = text.match(/^\s*/)![0].length;
+    // Calculate the correct indentation level based on the current state and the line's text
+    let indentation = this.parser.indent(state, text.slice(currSpace));
+    // Calculates the difference b/w the calculated indentation and the current whitespace.
+    let diff = indentation - currSpace;
+    if (!diff) return;
+
+    // If the difference is positive, it means the line needs more indentation
+    if (diff > 0) {
+      // Construct a string of spaces with the length of the difference
+      let space = "";
+      for (let i = 0; i < diff; i++) space = space + " ";
+      // Insert the spaces at the beginning of the lines
+      this.replaceLines(n, n + 1, [space + text]);
+    } else {
+      // If the difference is negative, it means the line has too much indentation.
+
+      // Remove the extra spaces from the beginning of the line.
+      this.replaceLines(n, n + 1, [text.slice(-diff)]);
+    }
+
+    // Create copies of the from and to positions of the selection
+    let from = copyPosition(this.selection.from);
+    let to = copyPosition(this.selection.to);
+
+    // If the from.line is the current line, it updates the from.ch to be at least the new indentation.
+    if (from.line == n) from.ch = Math.max(indentation, from.ch + diff);
+    // If the to.line is the current line, it updates the to.ch to be at least the new indentation.
+    if (to.line == n) to.ch = Math.max(indentation, to.ch + diff);
+
+    // Sets the selection with the new from and to positions.
+    this.setSelection(from, to);
+
+    return true;
   }
 
   /**
@@ -833,6 +947,7 @@ export class AscendEditor {
     // Loop through the work queue
     while (this.work.length) {
       let task = this.work.pop()!;
+
       // Skip lines that have already been highlighted
       if (this.lines[task].stateAfter) continue;
 
@@ -875,27 +990,101 @@ export class AscendEditor {
     this.highlightTimeout = setTimeout(() => self.highlightWorker(), time);
   }
 
+  /**
+   * Sets the selected style for a give line of code. This function highlights a portion of a text wirhin the editor
+   * to indicate selection.
+   * @param lineNo - The line number to apply the selection to (0-indexed)
+   * @param start - The starting character position of the selection within the line (0-indexed)
+   * @param end - The ending character position of the selection within the line (0-indexed)
+   */
   setSelectedStyle(lineNo: number, start: number, end: number | null) {
     const line = this.lines[lineNo];
-    if (!line.text) return;
+    let div = line.selDiv;
+    let repl = line.div; // holds the element that will be replaced
 
-    if (end === null) end = line.text.length;
+    // If a selection div already exists, check if the new selection matches the existing one.
+    if (div) {
+      // If the new selection's start and end positions are identical to the existing selection, there's no need
+      // to update, return early.
+      if (div.start == start && div.end == end) return;
+      // If it does not match, the existing selection becomes the repl
+      repl = div;
+    }
 
-    line.div.innerHTML = "";
+    // Create a new div element to represent the selection. This div will contain the styled text.
+    div = line.selDiv = document.createElement("div");
 
-    // If the start position is not at the begining of the line
+    // If the start position is greatet than 0, it means there's a selection to apply
     if (start > 0) {
-      // Add a text span for the part before the selection
-      addTextSpan(line.div, line.text.slice(0, start));
+      // Add a text span with the text before the selection
+      addTextSpan(div, line.text.slice(0, start));
+
+      // Extract the selected text from the line
+      let selText = line.text.slice(
+        start,
+        end == null ? line.text.length : end
+      );
+
+      // If "end" is null, the selection extends to the end of the line adding a space to the selected text.
+      if (end == null) selText += " ";
+      // Add a text span for the selected text, and apply the selected class for styling.
+      addTextSpan(div, selText).className = "ascend-editor-selected";
+
+      // If "end" is not null and it's within the line's text, add a text span for the text after the selection.
+      if (end != null && end < line.text.length) {
+        addTextSpan(div, line.text.slice(end));
+      }
+
+      div.start = start;
+      div.end = end;
+
+      // Replace the original or previous selection div with the new selection div in the code container.
+      this.code.replaceChild(div, repl);
+    }
+  }
+
+  /**
+   * Retrieves the editor's state immediately before a specified line number, efficiently searching backward to find the nearest
+   * saved state or the initial state. This function is crucial for incremental parsing and syntax highlighting, allowing the
+   * editor to quickly determine the context for a given line without reparsing the entire document.
+   * @param n - The line number to retrieve the preceding state
+   * @returns {any | null} - The editor's state before line "n", or nukk if the state cannot be determined by a reasonable search limit.
+   * Returns a copy of the state to avoid unintended modifications.
+   */
+  getStateBefore(n: number) {
+    let state;
+    let search: number;
+    let lim: number;
+
+    // Perform a backward search to locate the nearest saved or the start state. The search starts from the line immediately before
+    // "n" and proceeds backward. "lim" defines a limit to prevent excessive searching (40 lines back).
+    for (search = n - 1, lim = n - 40; ; search--) {
+      // If the search goes beyond the beginning of the document, use the parser's start state.
+      if (search < 0) {
+        state = this.parser.startState();
+        break; // Exit the loop once the start state is reached
+      }
+
+      // If the search reaches the search limit, the state is not found
+      if (lim > search) return null;
+
+      // Check if a state has been saved for the current line in the backward search. If found, copy the state to avoid
+      // mutation and break the loop.
+      if ((state = this.lines[search].stateAfter)) {
+        state = copyState(state);
+        break;
+      }
     }
 
-    // Add a text span for the selected part
-    addTextSpan(line.div, line.text.slice(start, end)).className =
-      "ascend-editor-selected";
+    // Starting from the line immediately after the found state, re-highlight lines and update their stateAfter properties.
+    for (search++; search < n; search++) {
+      let line = this.lines[search];
 
-    if (end < line.text.length) {
-      addTextSpan(line.div, line.text.slice(end));
+      this.highLightLine(line, state);
+      line.stateAfter = copyState(state);
     }
+
+    return state;
   }
 
   selectAll() {
@@ -910,12 +1099,16 @@ export class AscendEditor {
   removeSelectedStyle(lineNo: number) {
     if (lineNo >= this.lines.length) return;
     const line = this.lines[lineNo];
-    line.div.innerHTML = "";
-    addTextSpan(line.div, line.text);
+    if (!line.selDiv) return;
+    this.code.replaceChild(line.div, line.selDiv);
+    line.selDiv = null;
+    // line.div.innerHTML = "";
+    // addTextSpan(line.div, line.text);
   }
 
   lineHeight() {
-    return this.lines[0].div.offsetHeight;
+    let firstLine = this.lines[0];
+    return (firstLine.selDiv || firstLine.div).offsetHeight;
   }
 
   charWidth() {
