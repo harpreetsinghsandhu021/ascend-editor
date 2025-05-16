@@ -35,6 +35,10 @@ export function positionLess(a: Position, b: Position): boolean {
   return a.line < b.line || (a.line === b.line && a.ch < b.ch);
 }
 
+export function copyPosition(pos: Position): Position {
+  return { ...pos };
+}
+
 export function htmlEscape(str: string): string {
   return str.replace(/[<&]/g, (str) => (str === "&" ? "&amp;" : "&lt;"));
 }

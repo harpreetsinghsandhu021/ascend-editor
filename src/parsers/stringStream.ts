@@ -83,7 +83,13 @@ export class StringStream {
    * Skips over whitespace characters.
    */
   eatSpace() {
+    let start = this.pos;
     while (/\s/.test(this.string.charAt(this.pos))) this.pos++;
+    return this.pos - start;
+  }
+
+  column() {
+    return this.pos;
   }
 
   /**
