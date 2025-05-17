@@ -13,6 +13,11 @@ body {
   background: black;
   margin-top: -0.1em;
   position: absolute;
+  display: none;
+}
+
+.ascend-editor-focused .ascend-editor-cursor {
+  display: block;
 }
 
 .ascend-editor-code {
@@ -32,6 +37,10 @@ body {
 }
 
 .ascend-editor-selected {
-  background-color: #add8e6 !important;
-  color: #959595 !important;
+  background-color: #bbb !important;
+  color: #fff !important;
+}
+
+.ascend-editor-focused .ascend-editor-selected {
+  background: #88f !important;
 }
