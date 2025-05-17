@@ -639,7 +639,6 @@ export const javascriptParser = (function () {
   function objProp(cx: any, type: string) {
     if (type == "variable") {
       cx.marked = "js-property";
-      return cx.cont();
     }
 
     if (atomicTypes.hasOwnProperty(type)) {
