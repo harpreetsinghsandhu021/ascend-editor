@@ -1,4 +1,4 @@
-import type { Offset, Position } from "../interfaces";
+import type { Line, Offset, Position } from "../interfaces";
 
 export const keyCodeMap: Record<string, number> = {
   End: 35,
@@ -58,4 +58,8 @@ export function copyState(state: any) {
   }
 
   return nState;
+}
+
+export function lineElt(line: Line) {
+  return line.selDiv || line.div;
 }
