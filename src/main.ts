@@ -44,6 +44,7 @@ export class AscendEditor {
   reducedSelection: { anchor: number } | null;
   pollTimer: number | null = null;
   blinker: number | null = null;
+  linesShifted: boolean = false;
   work: number[] = []; // Array of line numbers to be highlighted
   static parsers: { [name: string]: any } = {};
   static defaultParser: string | null = null;
@@ -86,17 +87,16 @@ export class AscendEditor {
     if (!this.parser) throw new Error("No parser found");
 
     this.lines = [];
-    this.setValue(options.value || "");
     const zero = { line: 0, ch: 0 };
 
     this.selection = { from: zero, to: zero };
     this.prevSelection = { from: zero, to: zero };
-    this.setCursor(0, 0);
+    this.$setValue(options.value || "");
+
+    this.endOperation();
 
     const self = this;
-    connect(div, "mousedown", function (e) {
-      self.onMouseDown(e);
-    });
+    connect(div, "mousedown", this.operation(this.onMouseDown));
 
     connect(div, "dragenter", function (e) {
       e.stop();
@@ -104,21 +104,15 @@ export class AscendEditor {
     connect(div, "dragover", function (e) {
       e.stop();
     });
-    connect(div, "drop", function (e) {
-      self.onDrop(e);
-    });
+    connect(div, "drop", this.operation(this.onDrop));
     connect(div, "paste", function (e) {
       self.input.focus();
       self.schedulePoll(20);
     });
 
-    connect(textarea, "keyup", function (e) {
-      self.onKeyUp(e);
-    });
+    connect(textarea, "keyup", this.operation(this.onKeyUp));
 
-    connect(textarea, "keydown", function (e) {
-      self.onKeyDown(e);
-    });
+    connect(textarea, "keydown", this.operation(this.onKeyDown));
 
     connect(textarea, "focus", function () {
       self.onFocus();
@@ -145,7 +139,7 @@ export class AscendEditor {
     this.reducedSelection = { anchor: 0 };
   }
 
-  setValue(code: string) {
+  $setValue(code: string) {
     this.replaceLines(0, this.lines.length, code.split(/\r?\n/g));
   }
 
@@ -173,23 +167,23 @@ export class AscendEditor {
     const move = connect(
       this.div,
       "mousemove",
-      function (e) {
+      this.operation(function (e: AsEvent) {
         // Get the current cursor position based om the mouse event
         let curr = self.clipPosition(self.mouseEventPos(e));
 
         // If the cursor position has changed, update the selection.
         if (!positionEqual(curr, last)) {
           last = curr;
-          self.setSelection(self.clipPosition(start), curr, false);
+          self.setSelection(self.clipPosition(start), curr);
         }
-      },
+      }),
       true
     );
 
     const up = connect(
       this.div,
       "mouseup",
-      function (e) {
+      this.operation(function (e: AsEvent) {
         // Set the final selection based on the start and end positions
         self.setSelection(
           self.clipPosition(start),
@@ -197,16 +191,16 @@ export class AscendEditor {
         );
 
         end();
-      },
+      }),
       true
     );
 
     const leave = connect(
       this.div,
       "mouseout",
-      function (e) {
+      this.operation(function (e: AsEvent) {
         if (e.target() === self.div) end();
-      },
+      }),
       true
     );
 
@@ -233,12 +227,12 @@ export class AscendEditor {
    */
   replaceLines(from: number, to: number, newText: string[]) {
     let lines = this.lines;
-    while (from < lines.length && newText[0] == lines[from].text) {
+    while (from < to && newText[0] == lines[from].text) {
       from++;
       newText.shift();
     }
 
-    while (to > from && newText[newText.length - 1] == lines[to - 1].text) {
+    while (to > from + 1 && newText[newText.length - 1] == lines[to - 1].text) {
       to--;
       newText.pop();
     }
@@ -301,7 +295,12 @@ export class AscendEditor {
     if (newText.length) newWork.push(from);
     this.work = newWork;
     this.startWorker(100);
-    return { from: from, to: to, diff: lenDiff };
+
+    let selLine = this.selection.from.line;
+
+    if (lenDiff || from != selLine || to != selLine + 1) {
+      this.linesShifted = true;
+    }
   }
 
   onDrop(e: AsEvent) {
@@ -315,9 +314,9 @@ export class AscendEditor {
     if (!text) return;
 
     const pos = this.clipPosition(this.mouseEventPos(e));
-    this.setSelection(pos, pos, false);
+    this.setSelection(pos, pos);
 
-    this.replaceSelection(text);
+    this.$replaceSelection(text);
   }
 
   onKeyUp(e: AsEvent) {
@@ -380,14 +379,21 @@ export class AscendEditor {
   }
   onFocus() {
     this.focused = true;
-    this.displaySelection();
+    // this.displaySelection();
     this.schedulePoll(2000);
+    if (this.div.className.search(/\bascend-editor-focused\b/)) {
+      this.div.className += " ascend-editor-focused";
+    }
   }
 
   onBlur() {
     this.shiftSelecting = null;
     this.focused = false;
-    this.displaySelection();
+    // this.displaySelection();
+    this.div.className = this.div.className.replace(
+      " ascend-editor-focused",
+      ""
+    );
   }
 
   /**
@@ -428,7 +434,10 @@ export class AscendEditor {
 
     // Schedule the appropriate poll based on whether key is provided
     if (time) {
-      this.pollTimer = setTimeout(key ? pollForKey : poll, time);
+      this.pollTimer = setTimeout(
+        this.operation(key ? pollForKey : poll),
+        time
+      );
     }
   }
 
@@ -504,39 +513,18 @@ export class AscendEditor {
       }
     }
 
-    // Check if the selection crosses line boundaries.
-    let lineCrossed =
-      rs ||
-      from.line != sel.from.line ||
-      to.line != sel.to.line ||
-      from.line != to.line;
-
     // If the text has changed, update the editor's content.
     if (changed) {
       this.shiftSelecting = null;
 
-      // Replace the lines in the editor with new content
-      let rpl = this.replaceLines(ed.from, ed.to, text.split(/\r?\n/g));
-
-      // Check if the replacement affects line structure.
-      if (
-        rpl.from != sel.from.line ||
-        rpl.to != sel.from.line + 1 ||
-        rpl.diff
-      ) {
-        lineCrossed = true;
-      }
-
-      // If the selection does'nt cross lines, update editing state directly
-      if (!lineCrossed) {
-        ed.start = selStart;
-        ed.end = selEnd;
-        ed.text = text;
-      }
+      this.replaceLines(ed.from, ed.to, text.split(/\r?\n/g));
     }
 
+    ed.text = text;
+    ed.start = selStart;
+    ed.end = selEnd;
     // Update the selection based on new start and end positions.
-    this.setSelection(from, to, lineCrossed as boolean);
+    this.setSelection(from, to);
 
     return changed ? "changed" : moved ? "moved" : false;
   }
@@ -552,31 +540,24 @@ export class AscendEditor {
     const sel = this.selection;
     const pr = this.prevSelection;
 
-    // Store the current selection as the previous selection.
-    this.prevSelection = { from: sel.from, to: sel.to };
-
-    this.cursor.style.display = "none";
-
     // Check is the selection is an empty range ("from" and "to" positions are the same)
     if (positionEqual(sel.from, sel.to)) {
       // If the previous selection was not empty
       if (!positionEqual(pr.from, pr.to)) {
+        this.cursor.style.display = "";
         // Remove the selected style from all lines in the previous selection
         for (var i = pr.from.line; i <= pr.to.line; i++) {
           this.removeSelectedStyle(i);
         }
       }
 
-      if (this.focused) {
-        this.cursor.style.display = "";
-
-        // Calculate the position of the cursor based on the selected line
-        let lineDiv = lineElt(this.lines[sel.from.line]);
-        this.cursor.style.top = lineDiv.offsetTop + "px";
-        this.cursor.style.left =
-          lineDiv.offsetLeft + this.charWidth() * sel.from.ch + "px";
-      }
+      // Calculate the position of the cursor based on the selected line
+      let lineDiv = lineElt(this.lines[sel.from.line]);
+      this.cursor.style.top = lineDiv.offsetTop + "px";
+      this.cursor.style.left =
+        lineDiv.offsetLeft + this.charWidth() * sel.from.ch + "px";
     } else {
+      this.cursor.style.display = "none";
       // If the previous selection was not empty
       if (!positionEqual(pr.from, pr.to)) {
         // Loop through the lines that are part of the previous selection but not part of the current selection.
@@ -618,10 +599,6 @@ export class AscendEditor {
         this.setSelectedStyle(sel.to.line, 0, sel.to.ch);
       }
     }
-
-    // Update the previous selection range with the current selection
-    pr.from = sel.from;
-    pr.to = sel.to;
 
     // Calculate the vertical position of the selection's first line
     let yPos = lineElt(this.lines[sel.from.line]).offsetTop;
@@ -722,7 +699,7 @@ export class AscendEditor {
    * Sets the text selection range in the editor.
    *
    */
-  setSelection(from: Position, to: Position, updateInput?: boolean) {
+  setSelection(from: Position, to: Position) {
     // Get the current selection object and the shift selecting state.
     let sel = this.selection;
     let sh = this.shiftSelecting;
@@ -757,18 +734,9 @@ export class AscendEditor {
     // Update the selection range
     sel.from = from;
     sel.to = to;
-
-    // Display the updated selection visually
-    this.displaySelection();
-
-    if (updateInput !== false) this.prepareInputArea();
   }
 
-  replaceSelection(
-    code: string,
-    updateInput?: boolean,
-    collapse?: "start" | "end"
-  ) {
+  $replaceSelection(code: string, collapse?: "start" | "end") {
     const lines = code.split(/\r?\n/g);
     let sel = this.selection;
 
@@ -801,7 +769,7 @@ export class AscendEditor {
       finalToPos = finalFromPos;
     }
 
-    this.setSelection(finalFromPos, finalToPos, updateInput);
+    this.setSelection(finalFromPos, finalToPos);
   }
 
   /**
@@ -809,10 +777,8 @@ export class AscendEditor {
    * After inserting the newline, it attempts to indent the newly created line.
    */
   insertNewLine() {
-    this.replaceSelection("\n", false, "end");
-    if (!this.indentLine(this.selection.from.line)) {
-      this.prepareInputArea();
-    }
+    this.$replaceSelection("\n", "end");
+    this.indentLine(this.selection.from.line);
   }
 
   /**
@@ -869,8 +835,6 @@ export class AscendEditor {
 
     // Sets the selection with the new from and to positions.
     this.setSelection(from, to);
-
-    return true;
   }
 
   /**
@@ -994,7 +958,10 @@ export class AscendEditor {
     if (!this.work.length) return;
     const self = this;
     clearTimeout(this.highlightTimeout!);
-    this.highlightTimeout = setTimeout(() => self.highlightWorker(), time);
+    this.highlightTimeout = setTimeout(
+      this.operation(this.highlightWorker),
+      time
+    );
   }
 
   /**
@@ -1114,6 +1081,74 @@ export class AscendEditor {
     // addTextSpan(line.div, line.text);
   }
 
+  /**
+   * Prepares for an operation by storing the current selection. This function captures the current selection's start
+   * and end positions before and operation is performed. It also resets the linesShifted flag.
+   */
+  startOperation() {
+    let ps = this.prevSelection;
+    let sel = this.selection;
+
+    ps.from = sel.from;
+    ps.to = sel.to;
+
+    this.linesShifted = false;
+  }
+
+  /**
+   * Finalizes an operation and updates the UI if necessary. This function compares the previous selection with the
+   * current selection to determine if the selection has changed. If it has, it updates the display and restarts the
+   * cursor blink. It also prepares the input if the selection spans multiple lines or if lines have been shifted.
+   */
+  endOperation() {
+    let ps = this.prevSelection;
+    let sel = this.selection;
+
+    // Check if the selection has changed by comparing the start and end positions.
+    if (!positionEqual(ps.from, sel.from) || !positionEqual(ps.to, sel.to)) {
+      // If the selection has changed, update the display to reflect the new selection.
+      this.displaySelection();
+      this.restartBlink();
+    }
+
+    // Check if the selection spans multiple lines or if lines have been shifted.
+    if (
+      ps.from.line != sel.from.line ||
+      ps.to.line != sel.to.line ||
+      this.linesShifted
+    ) {
+      this.prepareInputArea();
+    }
+  }
+
+  /**
+   * Wraps a function with start and end operation calls.
+   * This function is a higher order function that takes another function as an argument.
+   * It wraps the provided function with calls to startOperation and endOperation,
+   * ensuring that the necessary setup and cleanup are perfomed before and after the function's execution.
+   */
+  operation(f: Function) {
+    // Store a reference to 'this' for use within the returned function.
+    let self = this;
+
+    // If "f" is a string, assume it's a method name and get the actual function.
+    if (typeof f == "string") {
+      f = this[f];
+    }
+
+    // Return a new function that wraps the original function.
+    return function () {
+      // Prepare for the operation.
+      self.startOperation();
+      // Apply the original function "f" to the current context "self" with the provided arguments.
+      let result = f.apply(self, arguments);
+      // Finalize the operation.
+      self.endOperation();
+
+      return result; // Return the result of the original function.
+    };
+  }
+
   lineHeight() {
     let firstLine = this.lines[0];
     return lineElt(firstLine).offsetHeight;
@@ -1125,6 +1160,64 @@ export class AscendEditor {
 
   scrollEnd(top: boolean) {
     this.setCursor(top ? 0 : this.lines.length - 1);
+  }
+}
+
+/**
+ * Wrap API functions as operations
+ *
+ * This code transforms AscendEditor's internal API methods (those prefixed with $) into operation wrapped public methods.
+ * The wrapping ensures that complex operations are properly batched for performance and consistent state management.
+ *
+ * Operation wrapping is critical because it
+ * 1. Batches DOM updates for better performance.
+ * 2. Ensures the editor state remains consistent.
+ * 3. Prevents unnecessary redraws during multi-step operations.
+ * 4. Handles event dispatching at appropriate times.
+ */
+const proto = AscendEditor.prototype;
+
+/**
+ * Transforms an internal API method into a public operation-wrapped method
+ *
+ * This function takes an internal method name (prefixed with '$') and creates a public version (without the '$' prefix)
+ * that automatically wraps the method call within the startOperation() and endOperation() method.
+ * @param name - The name of the internal API method (with '$' prefix)
+ */
+function apiOp(name: string): void {
+  const f = (proto as any)[name];
+
+  // Create a new public method with the same name but without the `$` prefix.
+  (proto as any)[name.slice(1)] = function (
+    this: AscendEditor,
+    ...args: any[]
+  ): any {
+    // Begin an operation batch to optimize updates.
+    this.startOperation();
+
+    // Call the original method with all arguments and the correct 'this' context.
+    const result = f.apply(this, args);
+
+    // Complete the operation batch, triggering any necessary updates.
+    this.endOperation();
+
+    // Return the result from the original method call
+    return result;
+  };
+}
+
+/**
+ * Auto-wrap all internal API methods.
+ *
+ * Iterates through all properties of the AscendEditor prototype, identifying internal methods (those starting with '$')
+ * and wrapping them with operation handling.
+ *
+ * This approach allows the codebase to maintain clear seperation b/w internal implementation detaild and the public API
+ * while ensuring all public methods properly handle operation batching.
+ */
+for (const n in proto) {
+  if (n.charAt(0) === "$") {
+    apiOp(n);
   }
 }
 
