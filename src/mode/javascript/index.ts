@@ -77,9 +77,12 @@ export const javascriptParser = (function () {
 
   // Base tokenization function for javascript
   function jsTokenBase(stream: StringStream, state: any) {
-    function readOperator() {
-      while (stream.eat(isOperatorChar));
-      return { type: "operator", style: "js-operator" };
+    function readOperator(ch: any) {
+      return {
+        type: "operator",
+        style: "js-operator",
+        content: ch + stream.eatWhile(isOperatorChar),
+      };
     }
 
     // stream.eatSpace();
@@ -107,10 +110,10 @@ export const javascriptParser = (function () {
         while (stream.eat(/[gimy]/));
         return { type: "regexp", style: "js-string" };
       } else {
-        return readOperator();
+        return readOperator(ch);
       }
     } else if (isOperatorChar.test(ch!)) {
-      return readOperator();
+      return readOperator(ch);
     } else {
       const word = ch! + stream.eatWhile(/[\w\$_]/);
 
@@ -732,17 +735,39 @@ export const javascriptParser = (function () {
   }
 
   return {
-    startState: startState,
+    startState: startState, // The initial state of the parser.
+
+    // The tokenization function. This function is responsible for breaking the input stream into individual tokens.
+    // Params:
+    //   - stream: StringStream object
+    //   - state: state of the editor
+    // Returns:
+    //   A token object
     token: function (stream: StringStream, state: any) {
+      // Check if we are at the beginning of a line. If so, calculate the indentation level.
       let indent: number | null = null;
       if (stream.column() == 0) {
         indent = stream.eatSpace();
       }
 
+      // Call the tokenize function to get the next token from the input stream.
       let token = state.tokenize(stream, state);
+
+      // Determine if a re-parse is allowed based on the type of the current token. This is used to handle
+      // context-sensitive parsing, where the parser needs to re-parse the input stream based on the current token.
+      state.reAllowed =
+        token.type == "operator" ||
+        token.type == "keyword c" ||
+        token.type.match(/^[\[{}\(,;:]$/);
+
+      // Eat any whitespace characters.
       stream.eatSpace();
+
+      // Call the parseJS function to parse the token and update the parser state.
       return parseJS(token, stream.column(), indent, state);
     },
+
+    // The indentation function. This function is responsible for calculating the indentation level for a given line of code.
     indent: indentJS,
   };
 })();
