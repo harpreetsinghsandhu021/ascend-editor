@@ -45,6 +45,7 @@ export class AscendEditor {
   pollTimer: number | null = null;
   blinker: number | null = null;
   linesShifted: boolean = false;
+  updateInput: boolean = false;
   work: number[] = []; // Array of line numbers to be highlighted
   static parsers: { [name: string]: any } = {};
   static defaultParser: string | null = null;
@@ -65,8 +66,9 @@ export class AscendEditor {
     ));
     textarea.style.position = "absolute";
     textarea.style.width = "10000px";
-    textarea.style.top = "20em";
-    textarea.style.height = "10em";
+    textarea.style.top = "25em";
+    textarea.style.left = "-100000px";
+    // textarea.style.height = "10em";
     textarea.style.fontSize = "18px";
 
     const code = (this.code = div.appendChild(document.createElement("div")));
@@ -212,6 +214,8 @@ export class AscendEditor {
         self.onFocus();
         self.prepareInputArea();
       }
+
+      self.updateInput = true;
 
       move!();
       up!();
@@ -601,16 +605,28 @@ export class AscendEditor {
     }
 
     // Calculate the vertical position of the selection's first line
-    let yPos = lineElt(this.lines[sel.from.line]).offsetTop;
+    let head = sel.inverted ? sel.from : sel.to;
+    let headLine = lineElt(this.lines[head.line]);
+    let yPos = headLine.offsetTop;
     let line = this.lineHeight();
     let screen = this.code.clientHeight;
     let screenTop = this.code.scrollTop;
 
     // Scroll the code area vertically to ensure the selection is visible
     if (yPos < screenTop) {
-      this.code.scrollTop = Math.max(0, yPos - 0);
+      this.code.scrollTop = Math.max(0, yPos - 10);
     } else if (yPos + line > screenTop + screen) {
       this.code.scrollTop = yPos + line + 10 - screen;
+
+      let xPos = head.ch * this.charWidth();
+      let screenWidth = headLine.offsetWidth;
+      let screenLeft = this.code.scrollLeft;
+
+      if (xPos < screenLeft) {
+        this.code.scrollLeft = Math.max(0, xPos - 10);
+      } else if (xPos > screenWidth + screenLeft) {
+        this.code.scrollLeft = xPos + 10 - screenWidth;
+      }
     }
   }
 
@@ -793,7 +809,7 @@ export class AscendEditor {
   }
 
   /**
-   * Idents a specific line based on the parser's indentation rules.
+   * Indents a specific line based on the parser's indentation rules.
    * @param n - THe line number to indent (0-based index)
    */
   indentLine(n: number) {
@@ -804,8 +820,10 @@ export class AscendEditor {
     let text = this.lines[n].text;
     // Determines the current amount of whitespace at the beginning of the line.
     let currSpace = text.match(/^\s*/)![0].length;
+
     // Calculate the correct indentation level based on the current state and the line's text
     let indentation = this.parser.indent(state, text.slice(currSpace));
+
     // Calculates the difference b/w the calculated indentation and the current whitespace.
     let diff = indentation - currSpace;
     if (!diff) return;
@@ -1092,7 +1110,7 @@ export class AscendEditor {
     ps.from = sel.from;
     ps.to = sel.to;
 
-    this.linesShifted = false;
+    this.updateInput = false;
   }
 
   /**
@@ -1115,7 +1133,7 @@ export class AscendEditor {
     if (
       ps.from.line != sel.from.line ||
       ps.to.line != sel.to.line ||
-      this.linesShifted
+      this.updateInput
     ) {
       this.prepareInputArea();
     }
@@ -1224,5 +1242,5 @@ for (const n in proto) {
 AscendEditor.addParser("javascript", javascriptParser);
 
 const editor = new AscendEditor(document.getElementById("code")!, {
-  value: `function foo(a, b) {\n  var x = '100' + a;\n  return b ? x : 22.4;\n}\n`,
+  value: (document.getElementById("input") as HTMLTextAreaElement).value,
 });
