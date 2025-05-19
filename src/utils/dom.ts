@@ -23,6 +23,7 @@ export function splitSpan(node: HTMLElement, at: number) {
 
   // Create a new textspan containing the portion of the text span after the split point.
   let sp = textSpan(text.slice(at));
+  sp.className = node.className;
 
   // Insert the new text span into the DOM, immediately after the original node.
   node.parentNode?.insertBefore(sp, node.nextSibling);

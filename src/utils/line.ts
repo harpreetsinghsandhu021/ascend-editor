@@ -49,13 +49,8 @@ export class Line {
     if (this.selFrom == null) return;
 
     // Iterate through the child nodes of the line's div.
-    let currentNode: ChildNode | null = this.div.firstChild;
-    while (currentNode) {
-      // Remove the selection class from each child node
-      if (currentNode instanceof HTMLElement) {
-        selCls.remove(currentNode);
-      }
-      currentNode = currentNode.nextSibling;
+    for (let node = this.div.firstChild; node; node = node.nextSibling) {
+      selCls.remove(node as HTMLElement);
     }
 
     // Resets the selection start and end positions to null.
@@ -79,8 +74,11 @@ export class Line {
     let next;
 
     // Iterates through the child nodes of the line's div.
-    let currentNode: ChildNode | null = this.div.firstChild;
-    while (currentNode) {
+    for (
+      let currentNode = this.div.firstChild;
+      currentNode;
+      currentNode = currentNode.nextSibling
+    ) {
       // Gets the length of the text content of the current node.
       let len = currentNode.firstChild?.nodeValue?.length!;
 
@@ -94,7 +92,7 @@ export class Line {
           // If from equals to, then insert cursor element
           if (from == to) {
             inside = 2;
-            currentNode.parentNode?.insertBefore(
+            currentNode!.parentNode?.insertBefore(
               this.parent.cursor,
               currentNode
             );
@@ -134,8 +132,6 @@ export class Line {
 
       // Update the current position.
       pos += len;
-
-      currentNode = currentNode.nextSibling;
     }
 
     // Appends the cursor to the end of the line if the selection is cursor at the end.
@@ -144,7 +140,7 @@ export class Line {
     }
 
     this.selFrom = from;
-    this.selFrom = to;
+    this.selTo = to;
 
     // Joins spans to clean up any splits
     this.joinSpans();
@@ -198,6 +194,7 @@ export class Line {
     // Set the inner HTML of the line's div to the joined HTML array, effectively applying the highlighting.
     this.div.innerHTML = html.join("");
     // Restores the selection to its original position after applying the highlighting
-    this.setSelection(this.selFrom as number, this.selTo);
+
+    this.setSelection(this.selFrom!, this.selTo);
   }
 }

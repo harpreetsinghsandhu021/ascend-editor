@@ -88,7 +88,7 @@ export class AscendEditor {
     this.cursor = document.createElement("span");
     this.cursor.className = "ascend-editor-cursor";
     this.cursor.innerHTML = "&nbsp;";
-    this.cursor.style.visibility = "none";
+    // this.cursor.style.visibility = "none";
     this.restartBlink();
 
     this.measure = code.appendChild(document.createElement("span"));
@@ -107,7 +107,6 @@ export class AscendEditor {
     this.prevSelection = { from: zero, to: zero };
 
     this.$setValue(options.value || "");
-    return;
 
     this.endOperation();
 
@@ -200,14 +199,14 @@ export class AscendEditor {
     const move = connect(
       this.div,
       "mousemove",
-      this.operation(function (e: AsEvent) {
+      this.operation((e: AsEvent) => {
         // Get the current cursor position based om the mouse event
-        let curr = self.clipPosition(self.mouseEventPos(e));
+        let curr = this.clipPosition(this.mouseEventPos(e));
 
         // If the cursor position has changed, update the selection.
         if (!positionEqual(curr, last)) {
           last = curr;
-          self.setSelection(self.clipPosition(start), curr);
+          this.setSelection(this.clipPosition(start), curr);
         }
       }),
       true
@@ -216,11 +215,11 @@ export class AscendEditor {
     const up = connect(
       this.div,
       "mouseup",
-      this.operation(function (e: AsEvent) {
+      this.operation((e: AsEvent) => {
         // Set the final selection based on the start and end positions
-        self.setSelection(
-          self.clipPosition(start),
-          self.clipPosition(self.mouseEventPos(e))
+        this.setSelection(
+          this.clipPosition(start),
+          this.clipPosition(this.mouseEventPos(e))
         );
 
         end();
@@ -231,8 +230,8 @@ export class AscendEditor {
     const leave = connect(
       this.div,
       "mouseout",
-      this.operation(function (e: AsEvent) {
-        if (e.target() === self.div) end();
+      this.operation((e: AsEvent) => {
+        if (e.target() === this.div) end();
       }),
       true
     );
@@ -295,6 +294,7 @@ export class AscendEditor {
           document.createElement("div"),
           before
         );
+
         // Add empty lines to the splice arguments
         spliceArgs.push(new Line(div, this));
       }
@@ -406,7 +406,7 @@ export class AscendEditor {
     this.focused = true;
     // this.displaySelection();
     this.schedulePoll(2000);
-    if (this.div.className.search(/\bascend-editor-focused\b/)) {
+    if (this.div.className.search(/\bascend-editor-focused\b/) == -1) {
       this.div.className += " ascend-editor-focused";
     }
   }
@@ -603,6 +603,8 @@ export class AscendEditor {
       this.lines[sel.to.line].setSelection(0, sel.to.ch);
     }
 
+    console.log(this.lines);
+
     // Determines the head of the selection (start or end, depending on inversion) and
     // gets the corresponding line's div.
     let head = sel.inverted ? sel.from : sel.to;
@@ -721,7 +723,7 @@ export class AscendEditor {
     let sel = this.selection;
     let sh = this.shiftSelecting;
 
-    this.restartBlink();
+    // this.restartBlink();
 
     // Ensure that "from" comes before "to" by swapping if necc.
     if (positionLess(to, from)) {
