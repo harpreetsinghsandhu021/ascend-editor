@@ -1,9 +1,9 @@
 import "./style.css";
 import "./mode/javascript/index.ts";
 import "./mode/javascript/index.css";
-import type { Line, Position } from "./interfaces";
+import type { Position } from "./interfaces";
 import { AsEvent, connect } from "./utils/events";
-import { addTextSpan, removeElement } from "./utils/dom";
+import { removeElement } from "./utils/dom";
 import {
   copyPosition,
   copyState,
@@ -17,6 +17,7 @@ import {
 } from "./utils/helpers";
 import { StringStream, type TokenizeFn } from "./parsers/stringStream";
 import { javascriptParser } from "./mode/javascript/index.ts";
+import { Line } from "./utils/line.ts";
 
 interface EditorOptions {
   value?: string;
@@ -27,7 +28,7 @@ export class AscendEditor {
   div: HTMLDivElement;
   input: HTMLTextAreaElement;
   code: HTMLDivElement;
-  cursor: HTMLDivElement;
+  cursor: HTMLSpanElement;
   measure: HTMLSpanElement;
   lines: Array<Line>;
   selection: { from: Position; to: Position; inverted?: boolean };
@@ -53,12 +54,22 @@ export class AscendEditor {
     if (!AscendEditor.defaultParser) AscendEditor.defaultParser = name;
     AscendEditor.parsers[name] = parser;
   }
+  static fromTextArea = function (
+    textarea: HTMLTextAreaElement,
+    options: any
+  ) {};
+  toTextArea!: () => void;
   // TODO: Change the type of parser
   parser: any; // The parser for syntax highlighting
   highlightTimeout: number | null = null;
 
-  constructor(place: HTMLElement, options: EditorOptions) {
-    const div = (this.div = place.appendChild(document.createElement("div")));
+  constructor(place: any, options: EditorOptions) {
+    const div = (this.div = document.createElement("div"));
+    if (place.appendChild) {
+      place.appendChild(div);
+    } else {
+      place(div);
+    }
     div.className = "ascend-editor";
 
     const textarea = (this.input = div.appendChild(
@@ -66,7 +77,7 @@ export class AscendEditor {
     ));
     textarea.style.position = "absolute";
     textarea.style.width = "10000px";
-    textarea.style.top = "25em";
+    textarea.style.top = "-100000px";
     textarea.style.left = "-100000px";
     // textarea.style.height = "10em";
     textarea.style.fontSize = "18px";
@@ -74,8 +85,9 @@ export class AscendEditor {
     const code = (this.code = div.appendChild(document.createElement("div")));
     code.className = "ascend-editor-code";
 
-    this.cursor = code.appendChild(document.createElement("div"));
+    this.cursor = document.createElement("span");
     this.cursor.className = "ascend-editor-cursor";
+    this.cursor.innerHTML = "&nbsp;";
     this.cursor.style.visibility = "none";
     this.restartBlink();
 
@@ -93,21 +105,23 @@ export class AscendEditor {
 
     this.selection = { from: zero, to: zero };
     this.prevSelection = { from: zero, to: zero };
+
     this.$setValue(options.value || "");
+    return;
 
     this.endOperation();
 
     const self = this;
-    connect(div, "mousedown", this.operation(this.onMouseDown));
+    connect(code, "mousedown", this.operation(this.onMouseDown));
 
-    connect(div, "dragenter", function (e) {
+    connect(code, "dragenter", function (e) {
       e.stop();
     });
-    connect(div, "dragover", function (e) {
+    connect(code, "dragover", function (e) {
       e.stop();
     });
-    connect(div, "drop", this.operation(this.onDrop));
-    connect(div, "paste", function (e) {
+    connect(code, "drop", this.operation(this.onDrop));
+    connect(code, "paste", function (e) {
       self.input.focus();
       self.schedulePoll(20);
     });
@@ -145,11 +159,28 @@ export class AscendEditor {
     this.replaceLines(0, this.lines.length, code.split(/\r?\n/g));
   }
 
+  getValue() {
+    let lines = [];
+    for (let i = 0; i < this.lines.length; i++) {
+      lines.push(this.lines[i].text);
+    }
+    return lines.join("\n");
+  }
+
   /**
    * Handles the mousedown event on the editor
    * @param e - The mouse event object.
    */
   onMouseDown(e: AsEvent) {
+    let corner = eltOffset(this.code);
+
+    if (
+      (e.e as MouseEvent).pageX - corner.left > this.code.clientWidth ||
+      (e.e as MouseEvent).pageY - corner.top > this.code.clientHeight
+    ) {
+      return;
+    }
+
     let self = this;
     // Reset the shiftselecting property
     this.shiftSelecting = null;
@@ -249,18 +280,13 @@ export class AscendEditor {
       // Remove the extra lines from this.lines and their corresponding DIVs
       const removed = lines.splice(from, -lenDiff);
       for (let i = 0, l = removed.length; i < l; i++) {
-        removeElement(lineElt(removed[i]));
+        removeElement(removed[i].div);
       }
 
       // If the number of lines is greater than existing lines
     } else if (lenDiff > 0) {
       // Prepare the arguments for splicing new lines into this.lines
-      const spliceArgs: {
-        div: HTMLDivElement;
-        text: string;
-        stateAfter: null;
-        selDiv: null;
-      }[] = [];
+      const spliceArgs: Line[] = [];
       const before = lines[from] ? lines[from].div : null;
 
       // Insert new DIVs before the DIV at the `from` index
@@ -270,20 +296,15 @@ export class AscendEditor {
           before
         );
         // Add empty lines to the splice arguments
-        spliceArgs.push({ div, text: "", stateAfter: null, selDiv: null });
+        spliceArgs.push(new Line(div, this));
       }
+
       lines.splice.apply(lines, [from, 0, ...spliceArgs]);
     }
 
     // Update the text and tokens of each line in the given range
     for (let i = 0, l = newText.length; i < l; i++) {
-      const line = lines[from + i];
-      const text = (line.text = newText[i]);
-      if (line.selDiv) this.code.replaceChild(line.div, line.selDiv);
-      line.stateAfter = null;
-      line.selDiv = null;
-      line.div.innerHTML = "";
-      addTextSpan(line.div, line.text);
+      lines[from + i].replaceText(newText[i]);
     }
 
     let newWork = [];
@@ -303,7 +324,7 @@ export class AscendEditor {
     let selLine = this.selection.from.line;
 
     if (lenDiff || from != selLine || to != selLine + 1) {
-      this.linesShifted = true;
+      this.updateInput = true;
     }
   }
 
@@ -543,70 +564,50 @@ export class AscendEditor {
   displaySelection() {
     const sel = this.selection;
     const pr = this.prevSelection;
+    const self = this;
 
-    // Check is the selection is an empty range ("from" and "to" positions are the same)
-    if (positionEqual(sel.from, sel.to)) {
-      // If the previous selection was not empty
-      if (!positionEqual(pr.from, pr.to)) {
-        this.cursor.style.display = "";
-        // Remove the selected style from all lines in the previous selection
-        for (var i = pr.from.line; i <= pr.to.line; i++) {
-          this.removeSelectedStyle(i);
-        }
-      }
-
-      // Calculate the position of the cursor based on the selected line
-      let lineDiv = lineElt(this.lines[sel.from.line]);
-      this.cursor.style.top = lineDiv.offsetTop + "px";
-      this.cursor.style.left =
-        lineDiv.offsetLeft + this.charWidth() * sel.from.ch + "px";
-    } else {
-      this.cursor.style.display = "none";
-      // If the previous selection was not empty
-      if (!positionEqual(pr.from, pr.to)) {
-        // Loop through the lines that are part of the previous selection but not part of the current selection.
-        //
-        // Start from the line number of the previous selections's start positions, and end at the line number of
-        // the current selection's start position or one line after the previous selection's end position, whichever is smaller.
-        for (
-          let i = pr.from.line, e = Math.min(sel.from.line, pr.to.line + 1);
-          i < e;
-          i++
-        ) {
-          this.removeSelectedStyle(i);
-        }
-
-        // Loop through the lines that are part of the previous selection but not part of the current selection.
-        for (
-          let i = Math.max(sel.to.line + 1, pr.from.line);
-          i <= pr.to.line;
-          i++
-        ) {
-          this.removeSelectedStyle(i);
-        }
-      }
-
-      // If the selection is on the same line
-      if (sel.from.line == sel.to.line) {
-        // Apply the selected style to the range on that line
-        this.setSelectedStyle(sel.from.line, sel.from.ch, sel.to.ch);
-      } else {
-        // Apply the selected style to the beginning of the first line
-        this.setSelectedStyle(sel.from.line, sel.from.ch, null);
-
-        // Apply the selected style to all lines in between
-        for (let i = sel.from.line + 1; i < sel.to.line; i++) {
-          this.setSelectedStyle(i, 0, null);
-        }
-
-        // Apply the selected style to the end of the last line
-        this.setSelectedStyle(sel.to.line, 0, sel.to.ch);
-      }
+    // Removes the cursor from the DOM if it's currently attached to a Node.
+    if (this.cursor.parentNode) {
+      this.cursor.parentNode.removeChild(this.cursor);
     }
 
-    // Calculate the vertical position of the selection's first line
+    // Clears the selection from lines that were part of the previous selection.
+    for (
+      let i = pr.from.line,
+        e = Math.min(this.lines.length, sel.from.line, pr.to.line + 1);
+      i < e;
+      i++
+    ) {
+      this.lines[i].clearSelection();
+    }
+
+    // Clears the selection from lines that are not part of the previous selection by are part of the current selection.
+    for (
+      let i = Math.max(sel.to.line + 1, pr.from.line),
+        e = Math.min(pr.to.line, this.lines.length);
+      i <= e;
+      i++
+    ) {
+      this.lines[i].clearSelection();
+    }
+
+    // Sets the selection for a single-line selection.
+    if (sel.from.line === sel.to.line) {
+      this.lines[sel.from.line].setSelection(sel.from.ch, sel.to.ch);
+    } else {
+      // Sets the selection for a multi-line selection
+      this.lines[sel.from.line].setSelection(sel.from.ch, null);
+      for (let i = sel.from.line + 1; i < sel.to.line; i++) {
+        this.lines[i].setSelection(0, null);
+      }
+      this.lines[sel.to.line].setSelection(0, sel.to.ch);
+    }
+
+    // Determines the head of the selection (start or end, depending on inversion) and
+    // gets the corresponding line's div.
     let head = sel.inverted ? sel.from : sel.to;
-    let headLine = lineElt(this.lines[head.line]);
+    let headLine = this.lines[head.line].div;
+    // Calculate the vertical position of the selection's first line
     let yPos = headLine.offsetTop;
     let line = this.lineHeight();
     let screen = this.code.clientHeight;
@@ -649,7 +650,7 @@ export class AscendEditor {
    */
   mouseEventPos(e: AsEvent) {
     // Get the offset of the first line's div element
-    let offset = eltOffset(lineElt(this.lines[0]));
+    let offset = eltOffset(this.lines[0].div);
 
     // Calculate the x and y coordinates relative to the editor's scroll position
     let x = (e.e as MouseEvent).pageX - offset.left + this.code.scrollLeft;
@@ -706,7 +707,7 @@ export class AscendEditor {
     // Ensure the character position is within the range of characters in the line.
     // If it's negative, set it to 0 (the start of the line)
     // It it's greater than or equal to the length of the line's text, set it to the end of the line.
-    pos.ch = Math.max(0, Math.min(this.lines[pos.line].text.length, pos.ch));
+    pos.ch = Math.max(0, Math.min(this.lines[pos.line].text!.length, pos.ch));
 
     return pos;
   }
@@ -757,14 +758,14 @@ export class AscendEditor {
     let sel = this.selection;
 
     // Prepend the text before the selection start to the first new line
-    lines[0] = this.lines[sel.from.line].text.slice(0, sel.from.ch) + lines[0];
+    lines[0] = this.lines[sel.from.line].text!.slice(0, sel.from.ch) + lines[0];
 
     // Store the character position at the end of the newly inserted last line before appending the rest of the orgiinal line.
     // This is where the cursor will be if not collapsed.
     let endCh = lines[lines.length - 1].length;
 
     // Append the text after the selection end from from the original line to the last new line
-    lines[lines.length - 1] += this.lines[sel.to.line].text.slice(sel.to.ch);
+    lines[lines.length - 1] += this.lines[sel.to.line].text!.slice(sel.to.ch);
 
     // Determine the final 'from' and 'to' positions for the selection after replacement
     let finalFromPos: Position = sel.from;
@@ -817,7 +818,7 @@ export class AscendEditor {
     let state = this.getStateBefore(n);
     if (!state) return;
 
-    let text = this.lines[n].text;
+    let text = this.lines[n].text!;
     // Determines the current amount of whitespace at the beginning of the line.
     let currSpace = text.match(/^\s*/)![0].length;
 
@@ -878,11 +879,11 @@ export class AscendEditor {
     let endCh = sel.to.ch;
 
     for (let i = from; i < sel.from.line; i++) {
-      startCh += 1 + this.lines[i].text.length;
+      startCh += 1 + this.lines[i].text!.length;
     }
 
     for (let i = from; i < sel.to.line; i++) {
-      endCh += 1 + this.lines[i].text.length;
+      endCh += 1 + this.lines[i].text!.length;
     }
 
     // Update the editing object with the calculated values
@@ -897,33 +898,6 @@ export class AscendEditor {
     // Set the selection range in the input area
     this.input.selectionEnd = this.reducedSelection ? startCh : endCh;
     this.input.selectionStart = startCh;
-  }
-
-  /**
-   * Highlights a single line of code
-   * @param line - Line object
-   * @param state - The current state of the parser, used to determine the syntax highlighting styles
-   */
-  highLightLine(line: { text: string; div: HTMLElement }, state: any) {
-    const stream = new StringStream(line.text);
-
-    const html: string[] = []; // array to store HTML segements
-
-    // Loop through the line text
-    while (!stream.done()) {
-      // Get the starting position of the current token
-      const start = stream.pos;
-      // Get the syntax highlighting style for the current token
-      const style = this.parser.token(stream, state, start === 0);
-
-      // Extract the token text from the line
-      const str = line.text.slice(start, stream.pos);
-      // Append the token text wrapped in a span with the appropriate with appropriate style class
-      html.push(`<span class="${style}">${htmlEscape(str)}</span>`);
-    }
-
-    // Update the line's HTML element with the highlighted content
-    line.div.innerHTML = html.join("");
   }
 
   /**
@@ -965,7 +939,7 @@ export class AscendEditor {
         }
 
         // Highlight the current line and update its state
-        this.highLightLine(line, state);
+        line.highlight(this.parser, state);
         line.stateAfter = copyState(state);
       }
     }
@@ -980,59 +954,6 @@ export class AscendEditor {
       this.operation(this.highlightWorker),
       time
     );
-  }
-
-  /**
-   * Sets the selected style for a give line of code. This function highlights a portion of a text wirhin the editor
-   * to indicate selection.
-   * @param lineNo - The line number to apply the selection to (0-indexed)
-   * @param start - The starting character position of the selection within the line (0-indexed)
-   * @param end - The ending character position of the selection within the line (0-indexed)
-   */
-  setSelectedStyle(lineNo: number, start: number, end: number | null) {
-    const line = this.lines[lineNo];
-    let div = line.selDiv;
-    let repl = line.div; // holds the element that will be replaced
-
-    // If a selection div already exists, check if the new selection matches the existing one.
-    if (div) {
-      // If the new selection's start and end positions are identical to the existing selection, there's no need
-      // to update, return early.
-      if (div.start == start && div.end == end) return;
-      // If it does not match, the existing selection becomes the repl
-      repl = div;
-    }
-
-    // Create a new div element to represent the selection. This div will contain the styled text.
-    div = line.selDiv = document.createElement("div");
-
-    // If the start position is greatet than 0, it means there's a selection to apply
-    if (start > 0) {
-      // Add a text span with the text before the selection
-      addTextSpan(div, line.text.slice(0, start));
-
-      // Extract the selected text from the line
-      let selText = line.text.slice(
-        start,
-        end == null ? line.text.length : end
-      );
-
-      // If "end" is null, the selection extends to the end of the line adding a space to the selected text.
-      if (end == null) selText += " ";
-      // Add a text span for the selected text, and apply the selected class for styling.
-      addTextSpan(div, selText).className = "ascend-editor-selected";
-
-      // If "end" is not null and it's within the line's text, add a text span for the text after the selection.
-      if (end != null && end < line.text.length) {
-        addTextSpan(div, line.text.slice(end));
-      }
-
-      div.start = start;
-      div.end = end;
-
-      // Replace the original or previous selection div with the new selection div in the code container.
-      this.code.replaceChild(div, repl);
-    }
   }
 
   /**
@@ -1072,7 +993,7 @@ export class AscendEditor {
     for (search++; search < n; search++) {
       let line = this.lines[search];
 
-      this.highLightLine(line, state);
+      line.highlight(this.parser, state);
       line.stateAfter = copyState(state);
     }
 
@@ -1085,18 +1006,8 @@ export class AscendEditor {
     let endLine = this.lines.length - 1;
     this.setSelection(
       { line: 0, ch: 0 },
-      { line: endLine, ch: this.lines[endLine].text.length }
+      { line: endLine, ch: this.lines[endLine].text!.length }
     );
-  }
-
-  removeSelectedStyle(lineNo: number) {
-    if (lineNo >= this.lines.length) return;
-    const line = this.lines[lineNo];
-    if (!line.selDiv) return;
-    this.code.replaceChild(line.div, line.selDiv);
-    line.selDiv = null;
-    // line.div.innerHTML = "";
-    // addTextSpan(line.div, line.text);
   }
 
   /**
@@ -1169,7 +1080,7 @@ export class AscendEditor {
 
   lineHeight() {
     let firstLine = this.lines[0];
-    return lineElt(firstLine).offsetHeight;
+    return this.lines[0].div.offsetHeight;
   }
 
   charWidth() {
@@ -1214,13 +1125,10 @@ function apiOp(name: string): void {
     this.startOperation();
 
     // Call the original method with all arguments and the correct 'this' context.
-    const result = f.apply(this, args);
+    return f.apply(this, args);
 
     // Complete the operation batch, triggering any necessary updates.
     this.endOperation();
-
-    // Return the result from the original method call
-    return result;
   };
 }
 
@@ -1241,6 +1149,73 @@ for (const n in proto) {
 
 AscendEditor.addParser("javascript", javascriptParser);
 
-const editor = new AscendEditor(document.getElementById("code")!, {
-  value: (document.getElementById("input") as HTMLTextAreaElement).value,
-});
+/**
+ * Transforms a standard HTML Textarea element into a AscendEditor instance. It handles the synchronization of content
+ * between the editor and the textarea, including saving the editor's content back to the textarea and managing form
+ * submissions to ensure the editor's content is saved before the form is submitted. It also provides a "toTextarea" function
+ * to revert the editor back to the original textarea.
+ *
+ * @param textarea
+ * @param options
+ */
+AscendEditor.fromTextArea = function (textarea, options) {
+  if (options && options.value == null) {
+    options.value = textarea.value;
+  }
+
+  function save() {
+    textarea.value = instance.getValue();
+  }
+
+  let rmSubmit: any;
+  let realSubmit: () => void;
+  // If textarea is part of a form, set up form submission handling.
+  if (textarea.form) {
+    // Attach the "save" function to the form's "submit" event.
+    rmSubmit = connect(textarea.form, "submit", save);
+    // Store the original form's submit function.
+    realSubmit = textarea.form.submit;
+
+    // Create a wrapped submit function to ensure the editor's content is saved
+    // beofore the form is submitted.
+    function wrappedSubmit() {
+      // Update the textarea with the editor's current content.
+      updateField();
+      // Restore the original submit function.
+      textarea.form!.submit = realSubmit;
+      textarea.form?.submit();
+
+      // Restore the wrapped function for subsequent submissions.
+      textarea.form!.submit = wrappedSubmit;
+    }
+
+    textarea.form.submit = wrappedSubmit;
+  }
+
+  textarea.style.display = "none";
+
+  const instance = new AscendEditor(function (node: HTMLElement) {
+    textarea.parentNode?.insertBefore(node, textarea.nextSibling);
+  }, options);
+
+  // Add a function to revert to the original textarea.
+  instance.toTextArea = function () {
+    save();
+
+    textarea.parentNode?.removeChild(instance.div);
+
+    textarea.style.display = "";
+
+    if (textarea.form) {
+      textarea.form.submit = realSubmit;
+      rmSubmit();
+    }
+  };
+
+  return instance;
+};
+
+const editor = AscendEditor.fromTextArea(
+  document.getElementById("code") as HTMLTextAreaElement,
+  {}
+);

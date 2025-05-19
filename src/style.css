@@ -13,10 +13,16 @@
   font-style: normal;
   font-display: swap; /* Recommended for performance */
 }
+@font-face {
+  font-family: "Quicksand-Bold";
+  src: url("./assets/fonts/quicksand/Quicksand-Bold.ttf");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap; /* Recommended for performance */
+}
 
 body {
   font-size: 18px;
-  /* background-color: #e1e4e8; */
   font-family: "Quicksand";
   background: #f5f5f5;
 }
@@ -36,9 +42,11 @@ body {
   position: absolute;
   display: none;
 }
-
+.font-bold-style {
+  font-family: "Quicksand-Bold";
+}
 .ascend-editor-focused .ascend-editor-cursor {
-  display: block;
+  display: inline-block;
 }
 
 .ascend-editor-code {
@@ -65,11 +73,4 @@ body {
 
 .ascend-editor-focused .ascend-editor-selected {
   background: #88f !important;
-}
-
-@media screen and (min-width: 1280px) {
-  body {
-    width: 70%;
-    margin: 0 auto;
-  }
 }
