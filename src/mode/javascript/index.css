@@ -5,7 +5,7 @@ span.js-operator {
   color: #666;
 }
 span.js-keyword {
-  color: #90b !important;
+  color: #90b;
 }
 span.js-atom {
   color: #281;

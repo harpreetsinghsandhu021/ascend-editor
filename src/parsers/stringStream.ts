@@ -42,14 +42,14 @@ export class StringStream {
   eat(match: any): string | undefined {
     const ch = this.string.charAt(this.pos);
 
-    let ok: boolean;
+    let ok: boolean = false;
 
     if (typeof match == "string") {
       ok = ch == match;
     } else {
       if (ch && match.test) {
         ok = match.test(ch);
-      } else {
+      } else if (match instanceof Function) {
         ok = match(ch);
       }
     }
