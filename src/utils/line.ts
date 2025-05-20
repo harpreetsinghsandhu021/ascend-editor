@@ -1,6 +1,5 @@
 import { StringStream } from "../parsers/stringStream";
-import { selCls } from "./cssClass";
-import { splitSpan, textSpan } from "./dom";
+import { textSpan } from "./dom";
 import { htmlEscape } from "./helpers";
 
 /**
