@@ -1,14 +1,8 @@
-span.js-punctuation {
-  color: #666;
-}
-span.js-operator {
-  color: #666;
-}
 span.js-keyword {
   color: #90b;
 }
 span.js-atom {
-  color: #281;
+  color: #291;
 }
 span.js-variabledef {
   color: #00f;
