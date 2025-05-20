@@ -1,5 +1,5 @@
 export function connect(
-  node: Node,
+  node: Node | Window,
   type: string,
   handler: (event: AsEvent) => void,
   disconnect?: boolean

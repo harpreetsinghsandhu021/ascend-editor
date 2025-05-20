@@ -18,6 +18,7 @@ import {
 import { StringStream, type TokenizeFn } from "./parsers/stringStream";
 import { javascriptParser } from "./mode/javascript/index.ts";
 import { Line } from "./utils/line.ts";
+import { Timer } from "./utils/timer.ts";
 
 interface EditorOptions {
   value?: string;
@@ -44,6 +45,7 @@ export class AscendEditor {
   shiftSelecting: Position | null;
   reducedSelection: { anchor: number } | null;
   pollTimer: number | null = null;
+  poll: Timer;
   blinker: number | null = null;
   linesShifted: boolean = false;
   updateInput: boolean = false;
@@ -96,6 +98,8 @@ export class AscendEditor {
     this.measure.style.visibility = "hidden";
     this.measure.innerHTML = "-";
 
+    this.poll = new Timer();
+
     this.parser =
       AscendEditor.parsers[options.parser || AscendEditor.defaultParser];
     if (!this.parser) throw new Error("No parser found");
@@ -116,13 +120,16 @@ export class AscendEditor {
     connect(code, "dragenter", function (e) {
       e.stop();
     });
+
+    connect(code, "dblclick", this.operation(this.onDblClick));
+
     connect(code, "dragover", function (e) {
       e.stop();
     });
     connect(code, "drop", this.operation(this.onDrop));
     connect(code, "paste", function (e) {
       self.input.focus();
-      self.schedulePoll(20);
+      self.fastPoll();
     });
 
     connect(textarea, "keyup", this.operation(this.onKeyUp));
@@ -197,7 +204,7 @@ export class AscendEditor {
     e.stop();
 
     const move = connect(
-      this.div,
+      window,
       "mousemove",
       this.operation((e: AsEvent) => {
         // Get the current cursor position based om the mouse event
@@ -213,7 +220,7 @@ export class AscendEditor {
     );
 
     const up = connect(
-      this.div,
+      window,
       "mouseup",
       this.operation((e: AsEvent) => {
         // Set the final selection based on the start and end positions
@@ -228,10 +235,10 @@ export class AscendEditor {
     );
 
     const leave = connect(
-      this.div,
+      window,
       "mouseout",
       this.operation((e: AsEvent) => {
-        if (e.target() === this.div) end();
+        if (e.target() === document.body) end();
       }),
       true
     );
@@ -253,6 +260,29 @@ export class AscendEditor {
     }
   }
 
+  onDblClick(e: AsEvent) {
+    this.selectWordAt(this.clipPosition(this.mouseEventPos(e)));
+    e.stop();
+  }
+
+  selectWordAt(pos: Position) {
+    let line = this.lines[pos.line].text;
+    let start = pos.ch;
+    let end = pos.ch;
+
+    while (start > 0 && /\w/.test(line!.charAt(start - 1))) {
+      start--;
+    }
+    while (end < line!.length - 1 && /\w/.test(line!.charAt(end))) {
+      end++;
+    }
+
+    this.setSelection(
+      { line: pos.line, ch: start },
+      { line: pos.line, ch: end }
+    );
+    this.updateInput = true;
+  }
   /**
    * Updates a range of lines in the editor with new text content.
    * @param from - The starting line index to update (zero-based)
@@ -399,13 +429,13 @@ export class AscendEditor {
         this.input.selectionEnd = this.input.selectionStart;
       }
 
-      this.schedulePoll(20, id);
+      this.fastPoll(20, id);
     }
   }
   onFocus() {
     this.focused = true;
     // this.displaySelection();
-    this.schedulePoll(2000);
+    this.slowPoll();
     if (this.div.className.search(/\bascend-editor-focused\b/) == -1) {
       this.div.className += " ascend-editor-focused";
     }
@@ -422,48 +452,62 @@ export class AscendEditor {
   }
 
   /**
-   * Schedules a poll to read the editor's input and handle key events.
-   * @param time - The time in milliseconfs to wait before polling.
-   * @param key - The key being polled for. If provided, the poll will handle movement.
+   * Initializes a slow polling mechanism for the editor. This function sets up a recurring process to periodically
+   * check for input and perform operations. It's designed to be less frequent than `fastpoll`.
    */
-  schedulePoll(time: number, key?: string) {
-    const self = this;
-    let missed = false;
+  slowPoll() {
+    this.poll.set(2000, () => {
+      this.startOperation();
+      this.readInput();
+      if (this.focused) {
+        this.slowPoll();
+      }
 
-    // Polls for the specified key and handles movement keys.
-    function pollForKey() {
+      this.endOperation();
+    });
+  }
+
+  /**
+   * Initializes a fast polling mechanism for the editor. This function is designed to rapidly check for input,
+   * with the goal of providing a responsive editing experience. It often reacts to specific events, like key presses,
+   * and is more frequent than `slowpoll`.
+   * @param time
+   * @param keyId
+   */
+  fastPoll(time?: number, key?: string) {
+    let self = this;
+    let misses = 0; // Counter to track missed input reads.
+
+    function poll() {
+      self.startOperation();
+
       let state = self.readInput();
 
-      // If the state indicates a movement, mark the corresponding movement key as true
-      if (state === "moved") {
+      if (state === "moved" && key) {
         const keyId = keyCodeMap[key!];
         movementKeys[keyId] = true;
       }
 
-      // If a state change occured or this is the first missed poll, reschedule the poll
+      // If the input read was successfull (returned a truthy value)
       if (state) {
-        self.schedulePoll(200, key);
-      } else {
-        // Otherwise, schedule a regular poll after a longer delay.
-        self.schedulePoll(2000);
+        // reschedule the poll to run again in 80 milliseconds.
+        self.poll.set(80, poll);
+        // Reset the `misses` counter since input was recieved.
+        misses = 0;
       }
+      // If the input read failed
+      else if (misses++ < 4) {
+        // and the number of missed reads is less than 4, reschedule the poll to run again in 80 milliseconds.
+        // This allows a few retries before giving up.
+        self.poll.set(80, poll);
+      } else {
+        self.slowPoll();
+      }
+
+      self.endOperation();
     }
 
-    // Performs a regular poll to read the editor's input.
-    function poll() {
-      self.readInput();
-      if (self.focused) self.schedulePoll(2000);
-    }
-
-    clearTimeout(this.pollTimer as number);
-
-    // Schedule the appropriate poll based on whether key is provided
-    if (time) {
-      this.pollTimer = setTimeout(
-        this.operation(key ? pollForKey : poll),
-        time
-      );
-    }
+    this.poll.set(20, poll);
   }
 
   /**
