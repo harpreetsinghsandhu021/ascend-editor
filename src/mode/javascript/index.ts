@@ -4,6 +4,24 @@ interface KeywordMap {
   [key: string]: { type: string; style: string };
 }
 
+// Scratch variables to store intermediate results and avoid creating multiple objects.
+// These variables are reused to pass multiple values b/w function calls.
+let type: string;
+let content: string;
+
+/**
+ * Returns a style value while storing additional information in the type and content vars.
+ * @param tp
+ * @param style
+ * @param cont
+ * @returns
+ */
+function ret(tp: string, style?: any, cont?: string) {
+  type = tp;
+  content = cont!;
+  return style;
+}
+
 export const javascriptParser = (function () {
   // Moves the stream until the next unescaped 'end' character
   function nextUntilescaped(stream: StringStream, end: string) {
@@ -77,51 +95,41 @@ export const javascriptParser = (function () {
 
   // Base tokenization function for javascript
   function jsTokenBase(stream: StringStream, state: any) {
-    function readOperator(ch: any) {
-      return {
-        type: "operator",
-        style: "js-operator",
-        content: ch + stream.eatWhile(isOperatorChar),
-      };
-    }
-
-    // stream.eatSpace();
-
     const ch = stream.next();
 
     if (ch === '"' || ch === "'") {
       return chain(stream, state, jsTokenString(ch));
     } else if (/[\[\]{}\(\),;\:\.]/.test(ch!)) {
-      return { type: ch, style: "js-punctuation" };
+      return ret(ch as string);
     } else if (ch === "0" && stream.eat(/x/i)) {
       while (stream.eat(/[\da-f]/i));
-      return { type: "number", style: "js-atom" };
+      return ret("number", "js-atom");
     } else if (/\d/.test(ch!)) {
       stream.match(/^\d*(?:\.\d*)?(?:e[+\-]?\d+)?/);
-      return { type: "number", style: "js-atom" };
+      return ret("number", "js-atom");
     } else if (ch === "/") {
       if (stream.eat("*")) {
         return chain(stream, state, jsTokenComment);
       } else if (stream.eat("/")) {
         while (stream.next() != null);
-        return { type: "comment", style: "js-comment" };
+        return ret("comment", "js-comment");
       } else if (state.reAllowed) {
         nextUntilescaped(stream, "/");
         while (stream.eat(/[gimy]/));
-        return { type: "regexp", style: "js-string" };
+        return ret("regexp", "js-string");
       } else {
-        return readOperator(ch);
+        return ret("operator", null, ch + stream.eatWhile(isOperatorChar));
       }
     } else if (isOperatorChar.test(ch!)) {
-      return readOperator(ch);
+      return ret("operator", null, ch! + stream.eatWhile(isOperatorChar));
     } else {
       const word = ch! + stream.eatWhile(/[\w\$_]/);
 
       const known = keywords.propertyIsEnumerable(word) && keywords[word];
 
       return known
-        ? { type: known.type, style: known.style, content: word }
-        : { type: "variable", style: "js-variable", content: word };
+        ? ret(known.type, known.style, word)
+        : ret("variable", "js-variable", word);
     }
   }
 
@@ -131,7 +139,7 @@ export const javascriptParser = (function () {
       if (!nextUntilescaped(stream, quote)) {
         state.tokenize = jsTokenBase;
       }
-      return { type: "string", style: "js-string" };
+      return ret("string", "js-string");
     };
   }
 
@@ -148,7 +156,7 @@ export const javascriptParser = (function () {
       mayBeEnd = ch === "*";
     }
 
-    return { type: "comment", style: "js-comment" };
+    return ret("comment", "js-comment");
   }
 
   // Atomic types are fundamental lexical elements such as keywords or literal values, which are not further brokern down.
@@ -251,77 +259,64 @@ export const javascriptParser = (function () {
     };
   }
 
+  // Checks if a variable is defined in the current or any parent scopes.
+  function inScope(state: any, varname: string) {
+    let cursor: any = state.context;
+
+    while (cursor) {
+      if (cursor.vars[varname]) {
+        return true;
+      }
+      cursor = cursor.prev;
+    }
+  }
+
+  // Combinator utilities for parser state management.
+  // Context object for combinator utilities
+  let cx: {
+    state: any;
+    column: any;
+    marked: any;
+    cc: any;
+  } = { state: null, column: null, marked: null, cc: null };
+
+  function pass(...args: any[]) {
+    for (let i = args.length - 1; i >= 0; i--) {
+      cx.cc.push(args[i]);
+    }
+  }
+
+  // Passes the given arguments to the combinator chain and returns true.
+  function cont(...args: any[]) {
+    pass.apply(null, args);
+    return true;
+  }
+
+  // Registers a variable definition in the parser state.
+  function register(varname: string) {
+    if (cx.state!.context) {
+      cx.marked = "js-variabledef";
+      cx.state.context.vars[varname] = true;
+    }
+  }
+
   /**
    * The main parsing function that processes tokens and determines syntax highlighting.
    * It orchestrates the parsing process by usign combinators to handle different language constructs.
    */
   function parseJS(
-    token: any,
-    column: number,
-    indent: number | null,
-    state: any
+    state: any,
+    style: any,
+    type: string,
+    content: string,
+    column: any
   ): string {
-    const cc: any[] = state.cc;
-    const type = token.type;
+    const cc: any | null[] = state.cc;
 
-    // A utility function to add combinators to the continuation stack.
-    function pass(...args: any[]) {
-      for (let i = args.length - 1; i >= 0; i--) {
-        cc.push(args[i]);
-      }
-    }
-
-    // An object that holds the current parsing context, with utility functions
-    const cx: {
-      state: any;
-      column: number;
-      pass: (...args: any[]) => void;
-      cont: (...args: any[]) => boolean;
-      register: (varname: string) => void;
-      marked: string;
-    } = {
-      state: state,
-      column: column,
-      pass: pass,
-      // A helper to continue parsing with the given combinators
-      cont: function (...args: any[]) {
-        pass.apply(null, args);
-        return true;
-      },
-      // Registers a variable within the current scope.
-      register: function (varname: string) {
-        if (state.context) {
-          cx.marked = "js-variabledef";
-          state.context.vars[varname] = true;
-        }
-      },
-      marked: "",
-    };
-
-    // Checks if a variable is defined in the current or any parent scopes.
-    function inScope(varname: string) {
-      let cursor: any = state.context;
-
-      while (cursor) {
-        if (cursor.vars[varname]) {
-          return true;
-        }
-        cursor = cursor.prev;
-      }
-    }
-
-    // If an indentation level is provided, set the current indentation.
-    if (indent != null) {
-      if (!state.lexical.hasOwnProperty("align")) {
-        state.lexical.align = false;
-      }
-      state.indented = indent;
-    }
-
-    // Skips whitespace and comments
-    if (type == "whitespace" || type == "comment") {
-      return token.style;
-    }
+    cx.state = state;
+    cx.column = column;
+    cx.marked = null;
+    cx.cc = cc;
 
     // Ensure that align is set to true if not already.
     if (!state.lexical.hasOwnProperty("align")) {
@@ -338,19 +333,19 @@ export const javascriptParser = (function () {
         : statement;
 
       // Executes the combinator.
-      if (combinator(cx, type)) {
+      if (combinator(type, content)) {
         // After combinator execution, execute any lex functions on the stack.
         while (cc.length && (cc[cc.length - 1] as any).lex) {
-          cc.pop()(cx);
+          cc.pop()();
         }
 
         // Returns the style of the marked token, if any.
         if (cx.marked) return cx.marked;
         // Returns the style of a local variable.
-        if (type == "variable" && inScope(token.content))
+        if (type == "variable" && inScope(state, content))
           return "js-localvariable";
         // Returns the style of the token
-        return token.style;
+        return style;
       }
     }
   }
@@ -358,7 +353,7 @@ export const javascriptParser = (function () {
   // Combinators
 
   // Creates a new scope by pusing a context onto the stack.
-  function pushContext(cx: any) {
+  function pushContext() {
     cx.state.context = {
       prev: cx.state.context,
       vars: { this: true, arguments: true },
@@ -366,13 +361,13 @@ export const javascriptParser = (function () {
   }
 
   // Removes the current scope by popping the context stack.
-  function popContext(cx: any) {
+  function popContext() {
     cx.state.context = cx.state.context.prev;
   }
 
   // Pushes a new lexical context onto the stack.
   function pushLex(type: string, info?: any) {
-    const result = function (cx: any) {
+    const result = function () {
       const state = cx.state;
       state.lexical = new JSLexical(
         state.indented,
@@ -389,7 +384,7 @@ export const javascriptParser = (function () {
   }
 
   // Pops the current lexical context from the stack.
-  function popLex(cx: any) {
+  function popLex() {
     const state = cx.state;
     if (state.lexical.type == ")") {
       state.indented = state.lexical.indented;
@@ -400,13 +395,13 @@ export const javascriptParser = (function () {
 
   // Creates a combinator that expects a specific token type
   function expect(wanted: string) {
-    return function expecting(cx: any, type: string) {
+    return function expecting(type: string) {
       if (type == wanted) {
-        return cx.cont();
+        return cont();
       } else if (wanted == ";") {
         return;
       } else {
-        return cx.cont(expect);
+        return cont(expect);
       }
     };
   }
@@ -419,36 +414,36 @@ export const javascriptParser = (function () {
    * @param type - type of token encountered
    * @returns
    */
-  function statement(cx: any, type: string): boolean {
+  function statement(type: string): boolean | void {
     // Handling variable declarations (e.g, `var x = 10;`)
     if (type == "var") {
-      return cx.cont(pushLex("vardef"), vardef1, expect(";"), popLex);
+      return cont(pushLex("vardef"), vardef1, expect(";"), popLex);
     }
     // Handling keywords that start a block (e.g, `if`, `while`)
     // "keyword a" refers to keywords like `if` or `while` that are followed by an expression and then a statement.
     if (type == "keyword a") {
-      return cx.cont(pushLex("form"), expression, statement, popLex);
+      return cont(pushLex("form"), expression, statement, popLex);
     }
 
     // "keyword b" refers to keywords like `do` that are followed by a statement.
     if (type == "keyword b") {
-      return cx.cont(pushLex("form"), statement, popLex);
+      return cont(pushLex("form"), statement, popLex);
     }
 
     // Handling blocks of code enclosed in curly braces (e.g, `{ ... }`)
     if (type == "{") {
-      return cx.cont(pushLex("}"), block, popLex);
+      return cont(pushLex("}"), block, popLex);
     }
 
     // Handling empty statements
-    if (type == ";") return cx.cont();
+    if (type == ";") return cont();
 
     // Handling function definitions(e.g., function myFunc() { ... })
-    if (type == "function") return cx.cont(functiondef);
+    if (type == "function") return cont(functiondef);
 
     // Handling `for` loops
     if (type == "for") {
-      return cx.cont(
+      return cont(
         pushLex("form"),
         expect("("),
         pushLex(")"),
@@ -462,12 +457,12 @@ export const javascriptParser = (function () {
 
     // Handling statements starting with a variable (e.g., `x=10;` or `myLabel:`)
     if (type == "variable") {
-      return cx.cont(pushLex("stat"), maybeLabel);
+      return cont(pushLex("stat"), maybeLabel);
     }
 
     // Handling switch statements
     if (type == "switch") {
-      return cx.cont(
+      return cont(
         pushLex("form"),
         expression,
         pushLex("}", "switch"),
@@ -480,17 +475,17 @@ export const javascriptParser = (function () {
 
     // Handling  case clauses within a `switch` statement
     if (type == "case") {
-      return cx.cont(expression, expect(":"));
+      return cont(expression, expect(":"));
     }
 
     // Handling default in `try...catch, or switch` statements
     if (type == "default") {
-      return cx.cont(expect(":"));
+      return cont(expect(":"));
     }
 
     // Handling `catch` clauses in `try...catch` statements
     if (type == "catch") {
-      return cx.cont(
+      return cont(
         pushLex("form"),
         pushContext,
         expect("("),
@@ -505,7 +500,7 @@ export const javascriptParser = (function () {
     // Handling other kind of statements: general expression statements.
     // It pushes a "stat" lexical context, parses an expression, expects a semicolon
     // and then pops the lexical context.cl
-    return cx.pass(pushLex("stat"), expression, expect(";"), popLex);
+    return pass(pushLex("stat"), expression, expect(";"), popLex);
   }
 
   /**
@@ -517,38 +512,32 @@ export const javascriptParser = (function () {
    * @param type - The type of the expression.
    * @returns {Object} - The result of the expression evaluation.
    */
-  function expression(cx: any, type: string) {
+  function expression(type: string) {
     // If the current token type is an atomic type, it signifies the completion of a basic expression unit.
     // The parser then attempt to parse a potential operator following this atomic unit.
     if (atomicTypes.hasOwnProperty(type)) {
-      return cx.cont(maybeOperator);
+      return cont(maybeOperator);
     }
 
     if (type == "function") {
-      return cx.cont(functiondef);
+      return cont(functiondef);
     }
 
     if (type == "keyword c") {
-      return cx.cont(expression);
+      return cont(expression);
     }
 
     if (type == "(") {
-      return cx.cont(
-        pushLex(")"),
-        expression,
-        expect(")"),
-        popLex,
-        maybeOperator
-      );
+      return cont(pushLex(")"), expression, expect(")"), popLex, maybeOperator);
     }
 
     if (type == "operator") {
-      return cx.cont(expression);
+      return cont(expression);
     }
 
     // Handles array literals
     if (type == "[") {
-      return cx.cont(
+      return cont(
         pushLex("]"),
         commasep(expression, "]"),
         popLex,
@@ -558,15 +547,10 @@ export const javascriptParser = (function () {
 
     // Handles object literals
     if (type == "{") {
-      return cx.cont(
-        pushLex("}"),
-        commasep(objProp, "}"),
-        popLex,
-        maybeOperator
-      );
+      return cont(pushLex("}"), commasep(objProp, "}"), popLex, maybeOperator);
     }
 
-    return cx.cont();
+    return cont();
   }
 
   /**
@@ -579,17 +563,17 @@ export const javascriptParser = (function () {
    * @param type - The type of the current token
    * @param value - THe actual string value of the current token
    */
-  function maybeOperator(cx: any, type: string, value: string) {
+  function maybeOperator(type: string, value: string) {
     // Handles increment (++) and (--) operators. These are often postfix or prefix operators that can be followed
     // by another potential operator (e.g, i++ + j). Therefore, after encountering one of these, the parser should
     // continue to look for another operator.
     if (type == "operator" && /\+\+|--/.test(value)) {
-      return cx.cont(maybeOperator);
+      return cont(maybeOperator);
     }
 
     // For most arithematic operators, they are typically followd by an operand, which is parsed as an expression.
     if (type == "operator") {
-      return cx.cont(expression);
+      return cont(expression);
     }
 
     // A semicolon ";" usually marks the end of a statement or expression.
@@ -597,7 +581,7 @@ export const javascriptParser = (function () {
 
     // Handles the case where an opening parenthesis "(" follows what might be an operator
     if (type == "(") {
-      return cx.cont(
+      return cont(
         pushLex(")"),
         commasep(expression, ")"),
         popLex,
@@ -607,130 +591,124 @@ export const javascriptParser = (function () {
 
     // Handles property access using the dot "." operator (e.g., `object.property`)
     if (type == ".") {
-      return cx.cont(property, maybeOperator);
+      return cont(property, maybeOperator);
     }
 
     // Handles array element access using square brackets (e.g., array[index])
     if (type == "[") {
-      return cx.cont(
-        pushLex("]"),
-        expression,
-        expect("]"),
-        popLex,
-        maybeOperator
-      );
+      return cont(pushLex("]"), expression, expect("]"), popLex, maybeOperator);
     }
   }
 
   // Handles labels in Javascript
-  function maybeLabel(cx: any, type: string) {
+  function maybeLabel(type: string) {
     if (type == ":") {
-      return cx.cont(popLex, statement);
+      return cont(popLex, statement);
     }
-    return cx.pass(maybeOperator, expect(";"), popLex);
+    return pass(maybeOperator, expect(";"), popLex);
   }
 
   // Marks a property in an object.
-  function property(cx: any, type: string) {
+  function property(type: string) {
     if (type == "variable") {
       cx.marked = "js-property";
-      return cx.cont();
+      return cont();
     }
   }
 
   // Parses a property in an object literal.
-  function objProp(cx: any, type: string) {
+  function objProp(type: string) {
     if (type == "variable") {
       cx.marked = "js-property";
     }
 
     if (atomicTypes.hasOwnProperty(type)) {
-      return cx.cont(expect(":"), expression);
+      return cont(expect(":"), expression);
     }
   }
 
   // Parses a comma-seperated list of expressions.
   function commasep(what: any, end: string) {
-    function proceed(cx: any, type: string) {
+    function proceed(type: string) {
       if (type == ",") {
-        return cx.cont(what, proceed);
+        return cont(what, proceed);
       }
       if (type == end) {
-        return cx.cont();
+        return cont();
       }
 
-      return cx.cont(expect(end));
+      return cont(expect(end));
     }
 
-    return function commaSeperated(cx: any, type: string) {
-      if (type == end) return cx.cont();
-      else return cx.pass(what, proceed);
+    return function commaSeperated(type: string) {
+      if (type == end) return cont();
+      else return pass(what, proceed);
     };
   }
 
   // Parses a block of statements
-  function block(cx: any, type: string): boolean {
-    if (type == "}") return cx.cont();
-    return cx.pass(statement, block);
+  function block(type: string): boolean | void {
+    if (type == "}") return cont();
+    return pass(statement, block);
   }
 
   // Parses the first part of a variable definition.
-  function vardef1(cx: any, type: string, value: string): boolean {
+  function vardef1(type: string, value: string): boolean {
     if (type == "variable") {
-      cx.register(value);
-      return cx.cont(vardef2);
+      register(value);
+      return cont(vardef2);
     }
-    return cx.cont();
+    return cont();
   }
 
   // Parses the second part of a variable definition.
-  function vardef2(cx: any, type: string, value: string) {
-    if (value == "=") return cx.cont(expression, vardef2);
-    if (type == ",") return cx.cont(vardef1);
+  function vardef2(type: string, value: string) {
+    if (value == "=") return cont(expression, vardef2);
+    if (type == ",") return cont(vardef1);
   }
 
   // Parses the first part of a "for" loop specifier
-  function forspec1(cx: any, type: string) {
-    if (type == "var") return cx.cont(vardef1, forspec2);
-    if (type == ";") return cx.pass(forspec2);
-    if (type == "variable") return cx.cont(formaybein);
-    return cx.pass(forspec2);
+  function forspec1(type: string) {
+    if (type == "var") return cont(vardef1, forspec2);
+    if (type == ";") return pass(forspec2);
+    if (type == "variable") return cont(formaybein);
+    return pass(forspec2);
   }
 
   // Handles the "in" keyword in a "for...in" loop.
-  function formaybein(cx: any, type: string, value: string): boolean {
-    if (value == "in") return cx.cont(expression);
-    return cx.cont(maybeOperator, forspec2);
+  function formaybein(type: string, value: string): boolean {
+    if (value == "in") return cont(expression);
+    return cont(maybeOperator, forspec2);
   }
 
   // Parses the second part of a "for" loop specifier.
-  function forspec2(cx: any, type: String, value: string): boolean {
-    if (type == ";") return cx.cont(forspec3);
-    if (value == "in") return cx.cont(expression);
-    return cx.cont(expression, expect(";"), forspec3);
+  function forspec2(type: String, value: string): boolean {
+    if (type == ";") return cont(forspec3);
+    if (value == "in") return cont(expression);
+    return cont(expression, expect(";"), forspec3);
   }
 
   // Parses the third part of a "for" loop specifier
-  function forspec3(cx: any, type: string) {
-    if (type != ")") cx.cont(expression);
+  function forspec3(type: string) {
+    if (type != ")") cont(expression);
   }
 
   // Parses a function definition.
-  function functiondef(cx: any, type: string, value: string) {
+  function functiondef(type: string, value: string) {
     if (type == "variable") {
-      cx.register(value);
-      return cx.cont(functiondef);
+      register(value);
+      return cont(functiondef);
     }
     if (type == "(") {
-      return cx.cont(pushContext, commasep(funarguments, ")"));
+      return cont(pushContext, commasep(funarguments, ")"));
     }
   }
 
   // Parses a function argument.
-  function funarguments(cx: any, type: string, value: string) {
+  function funarguments(type: string, value: string) {
     if (type == "variable") {
-      cx.register(value);
-      return cx.cont();
+      register(value);
+      return cont();
     }
   }
 
@@ -746,25 +724,23 @@ export const javascriptParser = (function () {
     token: function (stream: StringStream, state: any) {
       // Check if we are at the beginning of a line. If so, calculate the indentation level.
       let indent: number | null = null;
-      if (stream.column() == 0) {
-        indent = stream.eatSpace();
+      let atStart = stream.column() == 0;
+      let spaces = stream.eatSpace();
+
+      if (atStart) {
+        if (!state.lexical.hasOwnProperty("align")) {
+          state.lexical.align = false;
+        }
+        state.indented = spaces;
       }
-
-      // Call the tokenize function to get the next token from the input stream.
-      let token = state.tokenize(stream, state);
-
-      // Determine if a re-parse is allowed based on the type of the current token. This is used to handle
-      // context-sensitive parsing, where the parser needs to re-parse the input stream based on the current token.
+      if (spaces) return null;
+      let style = state.tokenize(stream, state);
+      if (type == "comment") return style;
       state.reAllowed =
-        token.type == "operator" ||
-        token.type == "keyword c" ||
-        token.type.match(/^[\[{}\(,;:]$/);
-
-      // Eat any whitespace characters.
-      stream.eatSpace();
-
-      // Call the parseJS function to parse the token and update the parser state.
-      return parseJS(token, stream.column(), indent, state);
+        type == "operator" ||
+        type == "keyword c" ||
+        type.match(/^[\[{}\(,;:]$/);
+      return parseJS(state, style, type, content, stream.column());
     },
 
     // The indentation function. This function is responsible for calculating the indentation level for a given line of code.

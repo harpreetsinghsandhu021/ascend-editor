@@ -46,6 +46,7 @@ export class AscendEditor {
   reducedSelection: { anchor: number } | null;
   pollTimer: number | null = null;
   poll: Timer;
+  highlight: Timer;
   blinker: number | null = null;
   linesShifted: boolean = false;
   updateInput: boolean = false;
@@ -99,6 +100,7 @@ export class AscendEditor {
     this.measure.innerHTML = "-";
 
     this.poll = new Timer();
+    this.highlight = new Timer();
 
     this.parser =
       AscendEditor.parsers[options.parser || AscendEditor.defaultParser];
@@ -993,11 +995,9 @@ export class AscendEditor {
   startWorker(time: number) {
     if (!this.work.length) return;
     const self = this;
-    clearTimeout(this.highlightTimeout!);
-    this.highlightTimeout = setTimeout(
-      this.operation(this.highlightWorker),
-      time
-    );
+    this.highlight.set(time, function () {
+      self.highlightWorker();
+    });
   }
 
   /**

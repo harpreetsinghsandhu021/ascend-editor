@@ -39,7 +39,45 @@ export class Line {
    */
   setText(text: string): void {
     this.text = text;
-    this.styles.splice(0, this.styles.length, text, null);
+    let st = this.styles;
+
+    // Preserve styling for unchanged parts of the line. This section attempts to keep the existing style spans
+    // if the beginning and end of the line have not changed.
+    if (st.length > 2) {
+      let from = 0;
+      let to = text.length;
+      let sfrom = 0;
+      let sto = st.length - 2;
+
+      // Compare the beginning of the new text with the existing styles.
+      // Iterate as long as the text matches and there are more styles to compare.
+      while (
+        from < to &&
+        sfrom < sto &&
+        text.indexOf(st[sfrom]!, from) == from
+      ) {
+        // Increment from and sfrom and get the next comparison string.
+        from += st[sfrom]!.length;
+        sfrom += 2;
+      }
+
+      // Compare the end of the new text with the exisitn styles
+      while (
+        to > from &&
+        sto > sfrom &&
+        text.lastIndexOf(st[sto]!, to) === to - st[sto]!.length
+      ) {
+        // Decrement to and sto and get the next comparison string.
+        to -= st[sto]!.length;
+        sto -= 2;
+      }
+
+      // Replace the middle section of the styles array with the new text and a null style.
+      st.splice(sfrom, sto + 2 - sfrom, text.slice(from, to), null);
+    } else {
+      this.styles.splice(0, this.styles.length, text, null);
+    }
+
     this.stateAfter = null;
     this.div.innerHTML = "";
     this.div.appendChild(textSpan(text));
@@ -68,16 +106,26 @@ export class Line {
    */
   highlight(parser: any, state: any): void {
     const stream = new StringStream(this.text!);
-    this.styles.length = 0;
+    let st = this.styles;
+    st.length = 0;
 
     while (!stream.done()) {
       // Determines the starting position of the curren token.
       const start = stream.pos;
       // Calls the parser's token method to get the style of the current token.
       const style = parser.token(stream, state, start == 0);
+      // Extract the substring corresponding to the current token.
+      let substr = this.text!.slice(start, stream.pos);
 
-      this.styles.push(this.text?.slice(start, stream.pos) as string);
-      this.styles.push(style);
+      // Check if the current style is the same as the previous one.
+      if (st.length && st[length - 1] == style) {
+        // If the styles are the same, append the substring to the previous span.
+        st[st.length - 2] += substr;
+      } else {
+        // If the styles are different, push the substring and style to the styles array.
+        this.styles.push(substr);
+        this.styles.push(style);
+      }
     }
     this.updateDOM();
   }
