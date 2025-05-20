@@ -5,6 +5,13 @@
   font-style: normal;
   font-display: swap; /* Recommended for performance */
 }
+@font-face {
+  font-family: "Jetbrains-Regular";
+  src: url("./assets/fonts/jetbrains_mono/JetBrainsMono-Regular.ttf");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap; /* Recommended for performance */
+}
 
 @font-face {
   font-family: "Quicksand";
@@ -56,7 +63,7 @@ body {
   min-height: 400px;
   width: 100%;
   line-height: 1em;
-  font-family: "Jetbrains" !important;
+  font-family: "Jetbrains-Regular" !important;
   font-size: 15px;
   padding: 0.4em;
 }
