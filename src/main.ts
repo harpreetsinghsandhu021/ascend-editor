@@ -304,7 +304,7 @@ export class AscendEditor {
 
     // Update the text and tokens of each line in the given range
     for (let i = 0, l = newText.length; i < l; i++) {
-      lines[from + i].replaceText(newText[i]);
+      lines[from + i].setText(newText[i]);
     }
 
     let newWork = [];
@@ -578,7 +578,7 @@ export class AscendEditor {
       i < e;
       i++
     ) {
-      this.lines[i].clearSelection();
+      this.lines[i].setSelection(null, null);
     }
 
     // Clears the selection from lines that are not part of the previous selection by are part of the current selection.
@@ -588,7 +588,7 @@ export class AscendEditor {
       i <= e;
       i++
     ) {
-      this.lines[i].clearSelection();
+      this.lines[i].setSelection(null, null);
     }
 
     // Sets the selection for a single-line selection.
@@ -602,8 +602,6 @@ export class AscendEditor {
       }
       this.lines[sel.to.line].setSelection(0, sel.to.ch);
     }
-
-    console.log(this.lines);
 
     // Determines the head of the selection (start or end, depending on inversion) and
     // gets the corresponding line's div.
