@@ -40,7 +40,7 @@ body {
   position: relative;
   background-color: #fff;
   border-radius: 4px;
-  border: 2px solid #e7e7e7;
+  @apply border-2 border-gray-500;
 }
 
 .ascend-editor-cursor {
@@ -62,17 +62,12 @@ body {
   position: relative;
   white-space: pre;
   overflow: auto;
-  min-height: 400px;
+  height: 400px;
   width: 100%;
   line-height: 1em;
   font-family: "Jetbrains-Regular" !important;
   font-size: 15px;
   padding: 0.4em;
-}
-
-.ascend-editor div {
-  height: 1em;
-  min-width: 1px;
 }
 
 .ascend-editor-selected {
@@ -82,4 +77,14 @@ body {
 
 .ascend-editor-focused .ascend-editor-selected {
   background: #88f !important;
+}
+
+.ascend-editor-line-numbers {
+  @apply bg-gray-500 text-gray-100 text-right float-left -mt-[0.4em] mr-[0.4em]      
+  -mb-[0.4em]      
+  -ml-[0.4em]      
+  pt-[0.4em]       
+  pr-[0.2em]           
+  pb-[0.4em]      
+  pl-[0.4em];
 }
