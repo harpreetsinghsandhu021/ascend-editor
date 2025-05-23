@@ -1,6 +1,4 @@
 import "./style.css";
-import "./mode/javascript/index.ts";
-import "./mode/javascript/index.css";
 import type { Position } from "./interfaces";
 import { AsEvent, connect } from "./utils/events";
 import { removeElement } from "./utils/dom";
@@ -8,17 +6,15 @@ import {
   copyPosition,
   copyState,
   eltOffset,
-  htmlEscape,
   keyCodeMap,
-  lineElt,
   movementKeys,
   positionEqual,
   positionLess,
 } from "./utils/helpers";
-import { StringStream, type TokenizeFn } from "./parsers/stringStream";
 import { javascriptParser } from "./mode/javascript/index.ts";
 import { Line } from "./utils/line.ts";
 import { Timer } from "./utils/timer.ts";
+import { cssParser } from "./mode/css/index.ts";
 
 interface EditorOptions {
   value?: string;
@@ -1190,8 +1186,15 @@ for (const n in proto) {
     apiOp(n);
   }
 }
+const currentPath = window.location.pathname;
 
-AscendEditor.addParser("javascript", javascriptParser);
+if (currentPath.includes("css")) {
+  AscendEditor.addParser("css", cssParser);
+} else {
+  AscendEditor.addParser("javascript", javascriptParser);
+}
+
+console.log("currentpath", currentPath);
 
 /**
  * Transforms a standard HTML Textarea element into a AscendEditor instance. It handles the synchronization of content

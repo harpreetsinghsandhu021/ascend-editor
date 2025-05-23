@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + TS</title>
+  </head>
+  <body>
+    <div
+      class="relative flex min-h-screen items-start justify-center py-6 bg-white"
+    >
+      <div
+        class="absolute inset-0 [background-size:40px_40px] [background-image:linear-gradient(to_right,#e4e4e7_1px,transparent_1px),linear-gradient(to_bottom,#e4e4e7_1px,transparent_1px)]"
+      />
+      <div
+        class="pointer-events-none absolute inset-0 flex items-center justify-center bg-white [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)]"
+      ></div>
+    </div>
+    <div class="z-100 w-4xl max-md:w-[95%]" id="app">
+      <p
+        class="relative font-bold-style z-20 bg-gradient-to-b from-neutral-200 to-neutral-500 bg-clip-text text-4xl font-bold text-transparent sm:text-5xl"
+      >
+        Ascend Code Editor
+      </p>
+      <p class="py-2 pb-6 leading-[1.3]">
+        A lightweight code editor currently focused on JavaScript, with plans to
+        support additional languages in the future. Get started with streamlined
+        JS development now and stay tuned for more!
+      </p>
+      <form>
+        <textarea id="code" style="display: none" name="code">
+/* Fun Fact:The world's longest concert lasted 453 hours. */
+
+@import url("something.css");
+
+body {
+  margin: 0;
+  padding: 3em 6em;
+  font-family: tahoma, arial, sans-serif;
+  color: #000;
+}
+
+#navigation a {
+  font-weight: bold;
+  text-decoration: none !important;
+}
+
+h1 {
+  font-size: 2.5em;
+}
+
+h2 {
+  font-size: 1.7em;
+}
+
+h1:before, h2:before {
+  content: "::";
+}
+
+code {
+  font-family: courier, monospace;
+  font-size: 80%;
+  color: #418A8A;
+}
+      </textarea
+        >
+      </form>
+    </div>
+    <script type="module" src="../../main.ts"></script>
+  </body>
+</html>
