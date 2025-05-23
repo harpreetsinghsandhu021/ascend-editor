@@ -43,7 +43,7 @@ export class Line {
 
     // Preserve styling for unchanged parts of the line. This section attempts to keep the existing style spans
     // if the beginning and end of the line have not changed.
-    if (st.length > 2) {
+    if (text && st.length > 2) {
       let from = 0;
       let to = text.length;
       let sfrom = 0;
@@ -74,13 +74,14 @@ export class Line {
 
       // Replace the middle section of the styles array with the new text and a null style.
       st.splice(sfrom, sto + 2 - sfrom, text.slice(from, to), null);
-    } else {
+    } else if (text) {
       this.styles.splice(0, this.styles.length, text, null);
+    } else {
+      st.length = 0;
     }
 
     this.stateAfter = null;
-    this.div.innerHTML = "";
-    this.div.appendChild(textSpan(text));
+    this.updateDOM();
   }
 
   /**
@@ -118,7 +119,7 @@ export class Line {
       let substr = this.text!.slice(start, stream.pos);
 
       // Check if the current style is the same as the previous one.
-      if (st.length && st[length - 1] == style) {
+      if (st.length && st[st.length - 1] == style) {
         // If the styles are the same, append the substring to the previous span.
         st[st.length - 2] += substr;
       } else {
@@ -225,6 +226,8 @@ export class Line {
     // Handle the case of an open-ended selection.
     else if (sel === 1 && sto == null) {
       html.push('<span class="ascend-editor-selected"> </span>');
+    } else if (!html.length) {
+      addPiece(" ", "");
     }
 
     // Set the inner HTML of the div with the generated HTML.
