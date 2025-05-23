@@ -90,7 +90,6 @@ export class AscendEditor {
     this.cursor.className = "ascend-editor-cursor";
     this.cursor.innerHTML = "&nbsp;";
     // this.cursor.style.visibility = "none";
-    this.restartBlink();
 
     this.measure = code.appendChild(document.createElement("span"));
     this.measure.style.position = "absolute";
@@ -116,8 +115,9 @@ export class AscendEditor {
     this.prevSelection = { from: zero, to: zero };
 
     this.$setValue(options.value || "");
-
-    this.endOperation();
+    this.displaySelection();
+    this.restartBlink();
+    this.prepareInputArea();
 
     const self = this;
     connect(code, "mousedown", this.operation(this.onMouseDown));
@@ -559,6 +559,15 @@ export class AscendEditor {
     const moved =
       changed || selStart != ed.start || selEnd != (rs ? ed.start : ed.end);
 
+    if (
+      this.reducedSelection &&
+      !moved &&
+      sel.from.line == 0 &&
+      sel.from.ch == 0
+    ) {
+      this.reducedSelection = null;
+    }
+
     // If nothing has changed, exit early.
     if (!moved) return false;
 
@@ -698,15 +707,22 @@ export class AscendEditor {
     }
   }
 
+  findCursor() {
+    if (positionEqual(this.selection.from, this.selection.to)) {
+      return this.lines[this.selection.from.line].div.getElementsByClassName(
+        "ascend-editor-cursor"
+      )[0];
+    }
+  }
+
   restartBlink() {
     clearInterval(this.blinker as number);
-
-    this.cursor.style.visibility = "";
-    const self = this;
+    let on = true;
     this.blinker = setInterval(() => {
-      if (!self.div.parentNode) clearInterval(self.blinker as number);
-      const st = self.cursor.style;
-      st.visibility = st.visibility ? "" : "hidden";
+      let cursor = this.findCursor();
+      if (cursor) {
+        (cursor as HTMLElement).style.display = (on = !on) ? "" : "none";
+      }
     }, 650);
   }
 

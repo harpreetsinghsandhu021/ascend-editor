@@ -163,7 +163,7 @@ export class Line {
           // If from equals to, then set cursor position.
           if (sfrom === sto) {
             sel = 2;
-            currAt = node;
+            html.push('<span class="ascend-editor-cursor">\u200b</span>');
           } else {
             // Otherwise the selection starts at the span.
             sel = 1;
@@ -219,12 +219,14 @@ export class Line {
       addPiece(st[i] as string, st[i + 1]);
     }
 
+    const empty = html.length == 0;
+
     // Handle the case of empty selection at the end.
-    if (sel === 0 && sfrom === sto) {
-      currAt = node;
+    if (!empty && pos == sfrom && sfrom == sto) {
+      html.push('<span class="ascend-editor-cursor">\u200b</span>');
     }
     // Handle the case of an open-ended selection.
-    else if (sel === 1 && sto == null) {
+    if (sel === 1 && sto == null) {
       html.push('<span class="ascend-editor-selected"> </span>');
     } else if (!html.length) {
       addPiece(" ", "");
@@ -232,10 +234,5 @@ export class Line {
 
     // Set the inner HTML of the div with the generated HTML.
     this.div.innerHTML = html.join("");
-
-    // Insert the cursor if needed.
-    if (currAt != null) {
-      this.div.insertBefore(this.parent.cursor, this.div.childNodes[currAt]);
-    }
   }
 }

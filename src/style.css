@@ -44,7 +44,7 @@ body {
 }
 
 .ascend-editor-cursor {
-  width: 1px;
+  width: 1.5px;
   height: 1.2em;
   background: black;
   margin-top: -0.1em;
@@ -80,7 +80,7 @@ body {
 }
 
 .ascend-editor-line-numbers {
-  @apply bg-gray-500 text-gray-100 text-right float-left -mt-[0.4em] mr-[0.4em]      
+  @apply bg-gray-500 border-r-1 border-gray-700 text-gray-100 text-right float-left -mt-[0.4em] mr-[0.4em]      
   -mb-[0.4em]      
   -ml-[0.4em]      
   pt-[0.4em]       
