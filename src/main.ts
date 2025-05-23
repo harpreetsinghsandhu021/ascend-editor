@@ -19,6 +19,7 @@ import { cssParser } from "./mode/css/index.ts";
 interface EditorOptions {
   value?: string;
   parser?: any;
+  lineNumbers?: any;
 }
 
 export class AscendEditor {
@@ -27,6 +28,7 @@ export class AscendEditor {
   code: HTMLDivElement;
   cursor: HTMLSpanElement;
   measure: HTMLSpanElement;
+  lineNumbers?: HTMLDivElement;
   lines: Array<Line>;
   selection: { from: Position; to: Position; inverted?: boolean };
   prevSelection: { from: Position; to: Position };
@@ -94,6 +96,11 @@ export class AscendEditor {
     this.measure.style.position = "absolute";
     this.measure.style.visibility = "hidden";
     this.measure.innerHTML = "-";
+
+    if (options.lineNumbers) {
+      this.lineNumbers = code.appendChild(document.createElement("div"));
+      this.lineNumbers.className = "ascend-editor-line-numbers";
+    }
 
     this.poll = new Timer();
     this.highlight = new Timer();
@@ -353,6 +360,22 @@ export class AscendEditor {
 
     if (lenDiff || from != selLine || to != selLine + 1) {
       this.updateInput = true;
+    }
+
+    let lineNumbers = this.lineNumbers;
+    let length = this.lines.length;
+
+    if (lineNumbers) {
+      let nums = lineNumbers.childNodes.length;
+      while (nums > length) {
+        lineNumbers.removeChild(lineNumbers.lastChild!);
+        nums--;
+      }
+
+      while (nums < length) {
+        let num = lineNumbers.appendChild(document.createElement("div"));
+        num.innerHTML = `${++nums}`;
+      }
     }
   }
 
@@ -1264,5 +1287,5 @@ AscendEditor.fromTextArea = function (textarea, options) {
 
 const editor = AscendEditor.fromTextArea(
   document.getElementById("code") as HTMLTextAreaElement,
-  {}
+  { lineNumbers: true }
 );
