@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 @font-face {
   font-family: "Jetbrains";
   src: url("./assets/fonts/jetbrains_mono/JetBrainsMono-Medium.ttf");
