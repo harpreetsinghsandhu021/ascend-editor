@@ -200,6 +200,8 @@ export class AscendEditor {
     let start = this.mouseEventPos(e);
     let last = start;
 
+    if (!start) return;
+
     // Set the cursor position and turn off double scroll/paste selection
     this.setCursor(start.line, start.ch, false);
 
@@ -213,10 +215,10 @@ export class AscendEditor {
       "mousemove",
       this.operation((e: AsEvent) => {
         // Get the current cursor position based om the mouse event
-        let curr = this.clipPosition(this.mouseEventPos(e));
+        let curr = this.clipPosition(this.mouseEventPos(e)!);
 
         // If the cursor position has changed, update the selection.
-        if (!positionEqual(curr, last)) {
+        if (!positionEqual(curr, last!)) {
           last = curr;
           this.setSelection(this.clipPosition(start), curr);
         }
@@ -231,7 +233,7 @@ export class AscendEditor {
         // Set the final selection based on the start and end positions
         this.setSelection(
           this.clipPosition(start),
-          this.clipPosition(this.mouseEventPos(e))
+          this.clipPosition(this.mouseEventPos(e)!)
         );
 
         end();
@@ -266,7 +268,7 @@ export class AscendEditor {
   }
 
   onDblClick(e: AsEvent) {
-    this.selectWordAt(this.clipPosition(this.mouseEventPos(e)));
+    this.selectWordAt(this.clipPosition(this.mouseEventPos(e)!));
     e.stop();
   }
 
@@ -389,7 +391,7 @@ export class AscendEditor {
 
     if (!text) return;
 
-    const pos = this.clipPosition(this.mouseEventPos(e));
+    const pos = this.clipPosition(this.mouseEventPos(e)!);
     this.setSelection(pos, pos);
 
     this.$replaceSelection(text);
@@ -714,18 +716,44 @@ export class AscendEditor {
    * @returns {{line: number, ch:number}}  - An object containing the line and character positions.
    */
   mouseEventPos(e: AsEvent) {
-    // Get the offset of the first line's div element
-    let offset = eltOffset(this.lines[0].div);
+    // Get the DOM element that was clicked and total number of lines
+    let target = e.target() as any;
+    let ln = this.lines.length;
 
-    // Calculate the x and y coordinates relative to the editor's scroll position
-    let x = (e.e as MouseEvent).pageX - offset.left + this.code.scrollLeft;
-    let y = (e.e as MouseEvent).pageY - offset.top + this.code.scrollTop;
+    // If clicked element is a span, use its parent div (line container)
+    // This handles clicks on syntax highlighted spans within lines
+    if (/span/i.test(target.nodeName)) target = target.parentNode;
 
-    // Calculate the line and character positions based on the coordinate and editor metrics
-    return {
-      line: Math.floor(y / this.lineHeight()),
-      ch: Math.floor(x / this.charWidth()),
-    };
+    // Handle clicks in the code area but below the last line
+    if (target == this.code) {
+      // Get the div containing the last line
+      let lastLine = this.lines[ln - 1].div;
+      // Calculate vertical offset from last line's top
+      let y =
+        (e.e as MouseEvent).pageY -
+        eltOffset(lastLine.firstChild as HTMLElement).top;
+
+      // If click is below the last line's height,
+      // return position at end of last line
+      if (y > lastLine.offsetHeight) return { line: ln - 1, ch: 0 };
+    } else {
+      // Handle clicks directly on line divs
+      // Linear search through all lines to find clicked div
+      // TODO: Optimize for large documents - O(n) complexity
+      for (let i = 0; i < ln; i++) {
+        if (this.lines[i].div === target) {
+          return {
+            line: i, // Line number
+            ch: Math.round(
+              // Calculate character offset by dividing x-position by char width
+              ((e.e as MouseEvent).pageX -
+                eltOffset(target.firstChild as HTMLElement).left) /
+                this.charWidth()
+            ),
+          };
+        }
+      }
+    }
   }
 
   /**
