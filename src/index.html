@@ -3,13 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
     <title>Vite + TS</title>
   </head>
   <body>
     <div
-      class="relative flex min-h-screen items-start justify-center py-6 bg-white"
+      class="relative z-10 flex min-h-screen items-start justify-center py-6 bg-white"
     >
       <div
         class="absolute inset-0 [background-size:40px_40px] [background-image:linear-gradient(to_right,#e4e4e7_1px,transparent_1px),linear-gradient(to_bottom,#e4e4e7_1px,transparent_1px)]"
@@ -18,18 +18,156 @@
         class="pointer-events-none absolute inset-0 flex items-center justify-center bg-white [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)]"
       ></div>
     </div>
-    <div class="z-100 w-4xl max-md:w-[95%]" id="app">
+    <aside class="w-full z-30 mr-10 p-6 sm:w-60">
+      <nav class="space-y-8 text-sm">
+        <div class="space-y-2">
+          <h2
+            class="text-md font-semibold tracking-widest uppercase dark:text-gray-600"
+          >
+            Getting Started
+          </h2>
+          <div class="flex flex-col space-y-2">
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Installation</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Plugins</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Migrations</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Appearance</a
+            >
+          </div>
+        </div>
+        <div class="space-y-2">
+          <h2
+            class="text-sm font-semibold tracking-widest uppercase dark:text-gray-600"
+          >
+            Languages
+          </h2>
+          <div class="flex flex-col space-y-2">
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="/"
+              >Javascript</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="./mode/css/index.html"
+              >CSS</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >XML/HTML</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Mixed-mode HTML</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >(C, C++, Java)</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Diff</a
+            >
+          </div>
+        </div>
+        <div class="space-y-2">
+          <h2
+            class="text-sm font-semibold tracking-widest uppercase dark:text-gray-600"
+          >
+            Pages
+          </h2>
+          <div class="flex flex-col space-y-2">
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Homepage</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Users</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Tools</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Settings</a
+            >
+          </div>
+        </div>
+        <div class="space-y-2">
+          <h2
+            class="text-sm font-semibold tracking-widest uppercase dark:text-gray-600"
+          >
+            Misc
+          </h2>
+          <div class="flex flex-col space-y-1">
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Tutorials</a
+            >
+            <a
+              rel="noopener noreferrer"
+              class="hover:scale-3d hover:translate-x-3.5 transition-all duration-75"
+              href="#"
+              >Changelog</a
+            >
+          </div>
+        </div>
+      </nav>
+    </aside>
+    <div class="w-4xl z-20 max-md:w-[95%]" id="app">
       <p
-        class="relative font-bold-style z-20 bg-gradient-to-b from-neutral-200 to-neutral-500 bg-clip-text text-4xl font-bold text-transparent sm:text-5xl"
+        class="relative font-bold-style bg-gradient-to-b from-neutral-200 to-neutral-500 bg-clip-text text-4xl font-bold text-transparent sm:text-5xl"
       >
         Ascend Code Editor
       </p>
-      <p class="py-2 pb-6 leading-[1.3]">
+
+      <div class="py-2 pb-6 leading-[1.3]">
         A lightweight code editor currently focused on JavaScript, with plans to
         support additional languages in the future. Get started with streamlined
         JS development now and stay tuned for more!
-      </p>
-      <form>
+      </div>
+
+      <form class="z-10">
         <textarea id="code" style="display: none" name="code">
 // Fun Facts:Birds are descendants of dinosaurs. 
 // Birds are one of the few living things descended from dinosaur.
@@ -83,6 +221,7 @@ StringStream.prototype = {
         >
       </form>
     </div>
+
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

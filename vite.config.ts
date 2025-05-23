@@ -1,5 +1,5 @@
 import { sync } from "glob";
-
+import tailwindcss from "@tailwindcss/vite";
 export default {
   root: "./src",
   build: {
@@ -9,4 +9,5 @@ export default {
       input: sync("./src/**/*.html".replace(/\\/g, "/")),
     },
   },
+  plugins: [tailwindcss()],
 };
