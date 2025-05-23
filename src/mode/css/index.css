@@ -1,0 +1,27 @@
+span.css-at {
+  color: #708;
+}
+span.css-unit {
+  color: #281;
+}
+span.css-value {
+  color: #708;
+}
+span.css-identifier {
+  color: black;
+}
+span.css-selector {
+  color: #11b;
+}
+span.css-important {
+  color: #00f;
+}
+span.css-colorcode {
+  color: #299;
+}
+span.css-comment {
+  color: #a70;
+}
+span.css-string {
+  color: #a22;
+}

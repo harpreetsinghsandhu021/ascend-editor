@@ -1,5 +1,5 @@
 import type { StringStream, TokenizeFn } from "../../parsers/stringStream";
-
+import "./index.css";
 interface KeywordMap {
   [key: string]: { type: string; style: string };
 }
@@ -342,8 +342,9 @@ export const javascriptParser = (function () {
         // Returns the style of the marked token, if any.
         if (cx.marked) return cx.marked;
         // Returns the style of a local variable.
-        if (type == "variable" && inScope(state, content))
+        if (type == "variable" && inScope(state, content)) {
           return "js-localvariable";
+        }
         // Returns the style of the token
         return style;
       }
@@ -401,7 +402,7 @@ export const javascriptParser = (function () {
       } else if (wanted == ";") {
         return;
       } else {
-        return cont(expect);
+        return cont(expecting);
       }
     };
   }
@@ -439,7 +440,9 @@ export const javascriptParser = (function () {
     if (type == ";") return cont();
 
     // Handling function definitions(e.g., function myFunc() { ... })
-    if (type == "function") return cont(functiondef);
+    if (type == "function") {
+      return cont(functiondef);
+    }
 
     // Handling `for` loops
     if (type == "for") {
@@ -700,7 +703,12 @@ export const javascriptParser = (function () {
       return cont(functiondef);
     }
     if (type == "(") {
-      return cont(pushContext, commasep(funarguments, ")"));
+      return cont(
+        pushContext,
+        commasep(funarguments, ")"),
+        statement,
+        popContext
+      );
     }
   }
 
@@ -740,6 +748,7 @@ export const javascriptParser = (function () {
         type == "operator" ||
         type == "keyword c" ||
         type.match(/^[\[{}\(,;:]$/);
+
       return parseJS(state, style, type, content, stream.column());
     },
 
