@@ -6,6 +6,7 @@ import {
   copyPosition,
   copyState,
   eltOffset,
+  htmlEscape,
   keyCodeMap,
   movementKeys,
   positionEqual,
@@ -731,7 +732,7 @@ export class AscendEditor {
    * @param e - The mouse event object.
    * @returns {{line: number, ch:number}}  - An object containing the line and character positions.
    */
-  mouseEventPos(e: AsEvent) {
+  mouseEventPos(e: AsEvent): { line: number; ch: number } {
     // Get the DOM element that was clicked and total number of lines
     let target = e.target() as any;
     let ln = this.lines.length;
@@ -752,24 +753,86 @@ export class AscendEditor {
       // If click is below the last line's height,
       // return position at end of last line
       if (y > lastLine.offsetHeight) return { line: ln - 1, ch: 0 };
-    } else {
+    } else if (target.parentNode == this.code) {
       // Handle clicks directly on line divs
       // Linear search through all lines to find clicked div
       // TODO: Optimize for large documents - O(n) complexity
+
+      // Calculate horizontal position in characters
+      let x = eltOffset(target.firstChild).left; // Left edge of first child
+      let mx = (e.e as MouseEvent).pageX; // Mouse x position
+      let cw = this.charWidth(); // Width of one character
+      let ch = Math.round((mx - x) / cw);
+
       for (let i = 0; i < ln; i++) {
-        if (this.lines[i].div === target) {
-          return {
-            line: i, // Line number
-            ch: Math.round(
-              // Calculate character offset by dividing x-position by char width
-              ((e.e as MouseEvent).pageX -
-                eltOffset(target.firstChild as HTMLElement).left) /
-                this.charWidth()
-            ),
-          };
+        let line = this.lines[i];
+
+        if (line.div == target) {
+          // Special handling for lines contaning tabs
+          if (line.text?.lastIndexOf("\t", ch)! > -1) {
+            // If clicked the line div itself, return end of line.
+            if (target == e.e.target) {
+              return { line: i, ch: line.text?.length! };
+            }
+
+            // Iterate through child nodes to find exact position.
+            let pos = 0;
+
+            for (let n = line.div.firstChild; n; n = n.nextSibling) {
+              let value = n.firstChild?.nodeValue;
+              let width = (n as HTMLElement).offsetWidth;
+
+              // Skip zero-width markers
+              if (value == "\u200b") continue;
+
+              // Found the node containing click position
+              if (x + width > mx) {
+                let tab = value?.indexOf("\t")!;
+                let ch = Math.round((mx - x) / cw);
+
+                // If no tab or click before tab, return simple offset
+                if (tab == -1 || tab >= ch) {
+                  return { line: i, ch: pos + ch };
+                }
+
+                // Handle click inside tab by splitting into individual characters.
+                try {
+                  // Create span for each character to measure exact widths
+                  let html = [];
+                  for (let j = 0; j < value?.length!; j++) {
+                    html.push(`<span>${htmlEscape(value?.charAt(j)!)}</span>`);
+                  }
+                  (n as HTMLElement).innerHTML = html.join("");
+
+                  // Find exact character position by measuring spans.
+                  for (let j = n.firstChild; j; j = j.nextSibling) {
+                    let width = (n as HTMLElement).offsetWidth;
+                    if (x + width > mx) {
+                      return {
+                        line: i,
+                        ch: pos + Math.round((mx - x) / width),
+                      };
+                    }
+                    pos++;
+                    x += width;
+                  }
+                } finally {
+                  // Restore original node content
+                  (n as HTMLElement).innerHTML = htmlEscape(value!);
+                }
+              }
+              pos += value?.length!;
+              x += width;
+            }
+          }
+          console.log("clearlhy here it is");
+
+          return { line: i, ch: Math.min(line.text?.length!, ch) };
         }
       }
     }
+
+    return { line: 0, ch: 0 };
   }
 
   /**
