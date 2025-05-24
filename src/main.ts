@@ -1,10 +1,11 @@
 import "./style.css";
-import type { Position } from "./interfaces";
+import type { Change, Position } from "./interfaces";
 import { AsEvent, connect } from "./utils/events";
 import { removeElement } from "./utils/dom";
 import {
   copyPosition,
   copyState,
+  editEnd,
   eltOffset,
   htmlEscape,
   keyCodeMap,
@@ -16,6 +17,7 @@ import { javascriptParser } from "./mode/javascript/index.ts";
 import { Line } from "./utils/line.ts";
 import { Timer } from "./utils/timer.ts";
 import { cssParser } from "./mode/css/index.ts";
+import { History } from "./editor/history/History.ts";
 
 interface EditorOptions {
   value?: string;
@@ -64,6 +66,7 @@ export class AscendEditor {
   // TODO: Change the type of parser
   parser: any; // The parser for syntax highlighting
   highlightTimeout: number | null = null;
+  history: History | null;
 
   constructor(place: any, options: EditorOptions) {
     const div = (this.div = document.createElement("div"));
@@ -110,6 +113,7 @@ export class AscendEditor {
     if (!this.parser) throw new Error("No parser found");
 
     this.lines = [];
+    this.history = new History();
     const zero = { line: 0, ch: 0 };
 
     this.selection = { from: zero, to: zero };
@@ -168,7 +172,10 @@ export class AscendEditor {
   }
 
   $setValue(code: string) {
+    this.history = null;
     this.replaceLines(0, this.lines.length, code.split(/\r?\n/g));
+    this.setCursor(0);
+    this.history = new History();
   }
 
   getValue() {
@@ -309,6 +316,18 @@ export class AscendEditor {
       newText.pop();
     }
 
+    if (this.history) {
+      let old: string[] = [];
+      for (let i = from; i < to; i++) {
+        old.push(lines[i].text!);
+      }
+      this.history.addChange(from, newText.length, old);
+    }
+    this.updateLines(from, to, newText);
+  }
+
+  updateLines(from: number, to: number, newText: string[]) {
+    let lines = this.lines;
     // Calculate the difference in number of lines b/w old and new content
     const lenDiff = newText.length - (to - from);
 
@@ -380,6 +399,59 @@ export class AscendEditor {
         num.innerHTML = `${++nums}`;
       }
     }
+  }
+
+  /**
+   * Helper function for implementing undo/redo in the editor. Handles the process of
+   * reverting or reapplying text changes by managing the change stacks.
+   * @param from - The source stack to pop changes from (either done or undone stack)
+   * @param to - The destination stack to push reversed changes to
+   */
+  unredoHelper(from: Change[], to: Change[]) {
+    // Pop the most recent change from the source stack.
+    const change = from.pop();
+
+    if (change) {
+      // Array to store the text that will be replaced.
+      const replaced: string[] = [];
+      // Calculate the end position of the change.
+      const end = change.start + change.added;
+
+      // Store the current text that will be replaced.
+      for (let i = change.start; i < end; i++) {
+        replaced.push(this.lines[i].text!);
+      }
+
+      // Apply the old text from the change record.
+      this.updateLines(change.start, end, change.old);
+
+      // Create and push a reverse change to the destination stack
+      to.push({
+        start: change.start,
+        added: change.old.length,
+        old: replaced,
+      });
+
+      // Set the cursor position after applying the change
+      // Places cursor at the end of the last line affected by the chnage
+      this.setCursor(
+        // line number
+        change.start + change.old.length - 1,
+        // character position
+        editEnd(
+          replaced[replaced.length - 1], // current last line
+          change.old[change.old.length - 1] // old last line
+        )
+      );
+    }
+  }
+
+  undo() {
+    this.unredoHelper(this.history?.done!, this.history?.undone!);
+  }
+
+  redo() {
+    this.unredoHelper(this.history?.undone!, this.history?.done!);
   }
 
   onDrop(e: AsEvent) {
