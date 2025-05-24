@@ -238,8 +238,8 @@ export const javascriptParser = (function () {
    * @param basecolumn
    * @param indentUnit
    */
-  function startState(basecolumn?: number, indentUnit?: number) {
-    if (!indentUnit) indentUnit = 2; // Default indent unit
+  function startState(options?: { [key: string]: any }, basecolumn?: number) {
+    const indentUnit = options!.indentUnit || 2; // Default indent unit
 
     return {
       tokenize: jsTokenBase, // The function used to tokenize the input.

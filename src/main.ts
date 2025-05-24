@@ -17,13 +17,7 @@ import { javascriptParser } from "./mode/javascript/index.ts";
 import { Line } from "./utils/line.ts";
 import { Timer } from "./utils/timer.ts";
 import { cssParser } from "./mode/css/index.ts";
-import { History } from "./editor/history/History.ts";
-
-interface EditorOptions {
-  value?: string;
-  parser?: any;
-  lineNumbers?: any;
-}
+import { History } from "./editor/history/history.ts";
 
 export class AscendEditor {
   div: HTMLDivElement;
@@ -36,6 +30,7 @@ export class AscendEditor {
   selection: { from: Position; to: Position; inverted?: boolean };
   prevSelection: { from: Position; to: Position };
   focused: boolean = false;
+  textChanged: boolean = false;
   editing: {
     text: string;
     from: number;
@@ -55,7 +50,7 @@ export class AscendEditor {
   static parsers: { [name: string]: any } = {};
   static defaultParser: string | null = null;
   static addParser(name: string, parser: any) {
-    if (!AscendEditor.defaultParser) AscendEditor.defaultParser = name;
+    if (!AscendEditor.defaults.parser) AscendEditor.defaults.parser = name;
     AscendEditor.parsers[name] = parser;
   }
   static fromTextArea = function (
@@ -68,7 +63,30 @@ export class AscendEditor {
   highlightTimeout: number | null = null;
   history: History | null;
 
-  constructor(place: any, options: EditorOptions) {
+  public static defaults: { [key: string]: any } = {
+    value: "",
+    indentUnit: 2,
+    parser: null,
+    lineNumbers: false,
+    firstLineNumber: 1,
+    onChange: null,
+    onCursorActivity: null,
+    workTime: 200,
+    workDelay: 300,
+    undoDepth: 40,
+  };
+  options: { [key: string]: any } = {};
+
+  constructor(place: any, options: any) {
+    if (!options) options = {};
+    let defaults = AscendEditor.defaults;
+
+    for (let opt in defaults) {
+      if (defaults.hasOwnProperty(opt) && !options.hasOwnProperty(opt)) {
+        this.options[opt] = options[opt] = defaults[opt];
+      }
+    }
+
     const div = (this.div = document.createElement("div"));
     if (place.appendChild) {
       place.appendChild(div);
@@ -108,15 +126,14 @@ export class AscendEditor {
     this.poll = new Timer();
     this.highlight = new Timer();
 
-    this.parser =
-      AscendEditor.parsers[options.parser || AscendEditor.defaultParser];
+    this.parser = AscendEditor.parsers[options.parser];
     if (!this.parser) throw new Error("No parser found");
 
     this.lines = [];
     this.history = new History();
     const zero = { line: 0, ch: 0 };
 
-    this.selection = { from: zero, to: zero };
+    this.selection = { from: zero, to: zero, inverted: false };
     this.prevSelection = { from: zero, to: zero };
 
     this.$setValue(options.value || "");
@@ -306,23 +323,41 @@ export class AscendEditor {
    */
   replaceLines(from: number, to: number, newText: string[]) {
     let lines = this.lines;
+
+    // Optimization 1: Skip unchanged lines at the beginning. If the first
+    // line of new text matches the existing line, increment the start position
+    // and remove that line from newText.
     while (from < to && newText[0] == lines[from].text) {
       from++;
       newText.shift();
     }
 
+    // Optimization 2: Skip unchanged lines at the end. If the last line
+    // of new text matches the existing line, decrement the end position and
+    // remove that line from newText.
     while (to > from + 1 && newText[newText.length - 1] == lines[to - 1].text) {
       to--;
       newText.pop();
     }
 
+    // If no changes are needed (all lines match), exit early.
+    if (from == to && !newText.length) return;
+
+    // Handle undo history if enabled.
     if (this.history) {
+      // Store the old content for undo operations.
       let old: string[] = [];
       for (let i = from; i < to; i++) {
         old.push(lines[i].text!);
       }
+      // Record the change in history
       this.history.addChange(from, newText.length, old);
+      // Maintain history size limit by removing oldest changes
+      while (this.history.done.length > this.options.undoDepth) {
+        this.history.done.shift();
+      }
     }
+    // Update the lines with new content.
     this.updateLines(from, to, newText);
   }
 
@@ -383,6 +418,7 @@ export class AscendEditor {
     if (lenDiff || from != selLine || to != selLine + 1) {
       this.updateInput = true;
     }
+    this.textChanged = true;
 
     let lineNumbers = this.lineNumbers;
     let length = this.lines.length;
@@ -396,7 +432,7 @@ export class AscendEditor {
 
       while (nums < length) {
         let num = lineNumbers.appendChild(document.createElement("div"));
-        num.innerHTML = `${++nums}`;
+        num.innerHTML = `${nums++ + this.options.firstLineNumber}`;
       }
     }
   }
@@ -713,11 +749,12 @@ export class AscendEditor {
   displaySelection() {
     const sel = this.selection;
     const pr = this.prevSelection;
-    const self = this;
 
-    // Removes the cursor from the DOM if it's currently attached to a Node.
-    if (this.cursor.parentNode) {
-      this.cursor.parentNode.removeChild(this.cursor);
+    if (
+      positionEqual(this.prevSelection.from, this.selection.from) &&
+      positionEqual(this.prevSelection.to, this.selection.to)
+    ) {
+      return;
     }
 
     // Clears the selection from lines that were part of the previous selection.
@@ -897,7 +934,6 @@ export class AscendEditor {
               x += width;
             }
           }
-          console.log("clearlhy here it is");
 
           return { line: i, ch: Math.min(line.text?.length!, ch) };
         }
@@ -1148,8 +1184,8 @@ export class AscendEditor {
    * Continuously highlights lines in the background
    * @param start
    */
-  highlightWorker(start?: number) {
-    const end = Number(new Date()) + 200; // time limit for highlighting
+  highlightWorker() {
+    const end = Number(new Date()) + this.options.workTime; // time limit for highlighting
 
     // Loop through the work queue
     while (this.work.length) {
@@ -1167,7 +1203,7 @@ export class AscendEditor {
         state = copyState(state);
       } else {
         // Start with the initial parser state
-        state = this.parser.startState();
+        state = this.parser.startState(this.options);
       }
 
       for (let i = task; i < this.lines.length; i++) {
@@ -1178,7 +1214,7 @@ export class AscendEditor {
         // If the time limit has been reached, reschedule the remaining
         if (Number(new Date()) > end) {
           this.work.push(i);
-          this.startWorker(300);
+          this.startWorker(this.options.workDelay);
           return;
         }
 
@@ -1216,7 +1252,7 @@ export class AscendEditor {
     for (search = n - 1, lim = n - 40; ; search--) {
       // If the search goes beyond the beginning of the document, use the parser's start state.
       if (search < 0) {
-        state = this.parser.startState();
+        state = this.parser.startState(this.options);
         break; // Exit the loop once the start state is reached
       }
 
@@ -1260,10 +1296,11 @@ export class AscendEditor {
     let ps = this.prevSelection;
     let sel = this.selection;
 
-    ps.from = sel.from;
-    ps.to = sel.to;
+    this.prevSelection.from = sel.from;
+    this.prevSelection.to = sel.to;
 
     this.updateInput = false;
+    this.textChanged = false;
   }
 
   /**
@@ -1276,7 +1313,11 @@ export class AscendEditor {
     let sel = this.selection;
 
     // Check if the selection has changed by comparing the start and end positions.
-    if (!positionEqual(ps.from, sel.from) || !positionEqual(ps.to, sel.to)) {
+    const selectionChanged =
+      !positionEqual(this.prevSelection.from, sel.from) ||
+      !positionEqual(this.prevSelection.to, sel.to);
+
+    if (selectionChanged) {
       // If the selection has changed, update the display to reflect the new selection.
       this.displaySelection();
       this.restartBlink();
@@ -1284,11 +1325,21 @@ export class AscendEditor {
 
     // Check if the selection spans multiple lines or if lines have been shifted.
     if (
-      ps.from.line != sel.from.line ||
-      ps.to.line != sel.to.line ||
+      this.prevSelection.from.line != sel.from.line ||
+      this.prevSelection.to.line != sel.to.line ||
       this.updateInput
     ) {
       this.prepareInputArea();
+    }
+
+    if (
+      (selectionChanged || this.textChanged) &&
+      this.options.onCursorActivity
+    ) {
+      this.options.onCursorActivity(AscendEditor);
+    }
+    if (this.textChanged && this.options.onChange) {
+      this.options.onChange(AscendEditor);
     }
   }
 
@@ -1395,8 +1446,6 @@ if (currentPath.includes("css")) {
 } else {
   AscendEditor.addParser("javascript", javascriptParser);
 }
-
-console.log("currentpath", currentPath);
 
 /**
  * Transforms a standard HTML Textarea element into a AscendEditor instance. It handles the synchronization of content
