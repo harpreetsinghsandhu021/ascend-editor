@@ -63,3 +63,28 @@ export function copyState(state: any) {
 export function lineElt(line: Line) {
   return line.selDiv || line.div;
 }
+
+/**
+ * Determines the end position of a text difference b/w two strings by comparing them from right to left.
+ * Used to optimize text change detection by finding where two strings start to differ from their ends.
+ * @param from - The original string before changes.
+ * @param to - The new string after changes.
+ * @returns The position from the end where the strings start to differ (1-based index from the end)
+ */
+export function editEnd(from: string, to: string): number {
+  // nothing to compare
+  if (!to) return 0;
+
+  // Return the full length of "to" as everything in "to" is considered new.
+  if (!from) return to.length;
+
+  let i = from.length;
+  let j = to.length;
+  // Start from the end of both strings and work backwards.
+  for (i = from.length, j = to.length; i >= 0 && j >= 0; --i, --j) {
+    if (from.charAt(i) !== to.charAt(j)) break;
+  }
+
+  // Return the position from the end where differences start (1-based)
+  return j + 1;
+}

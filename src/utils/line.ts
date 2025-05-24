@@ -122,7 +122,7 @@ export class Line {
       if (st.length && st[st.length - 1] == style) {
         // If the styles are the same, append the substring to the previous span.
         st[st.length - 2] += substr;
-      } else {
+      } else if (substr) {
         // If the styles are different, push the substring and style to the styles array.
         this.styles.push(substr);
         this.styles.push(style);

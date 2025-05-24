@@ -14,3 +14,9 @@ export interface Line {
   stateAfter: any;
   selDiv: any;
 }
+
+export interface Change {
+  start: number;
+  added: number;
+  old: string[];
+}
