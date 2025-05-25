@@ -14,10 +14,11 @@ import {
   positionLess,
 } from "./utils/helpers";
 import { javascriptParser } from "./mode/javascript/index.ts";
-import { Line } from "./utils/line.ts";
+import { Line } from "./editor/core/line.ts";
 import { Timer } from "./utils/timer.ts";
 import { cssParser } from "./mode/css/index.ts";
 import { History } from "./editor/history/history.ts";
+import { SearchCursor } from "./editor/search/searchCursor.ts";
 
 // Counter to track nested operation depth.
 // Helps manage concurrent or nested editor operations.
@@ -1105,7 +1106,7 @@ export class AscendEditor {
     from = this.clipPosition(from);
     to = to ? this.clipPosition(to) : from;
 
-    // Perform hte actual text replacement and get the end position.
+    // Perform the actual text replacement and get the end position.
     const end = this.replaceRange1(code, from, to);
 
     // Adjust the selection range based on the replacement.
@@ -1130,14 +1131,14 @@ export class AscendEditor {
       // Position is on the same line as replacement end
       if (pos.line == to?.line) {
         return {
-          line: pos.line,
-          ch: pos.ch + to.ch - end.ch,
+          line: end.line,
+          ch: pos.ch + end.ch - to.ch,
         };
       }
 
       // Position is after replacement - adjusts line number
       return {
-        line: pos.line + to!.line - end.line,
+        line: pos.line + end.line - to!.line,
         ch: pos.ch,
       };
     }
@@ -1586,6 +1587,15 @@ export class AscendEditor {
         this.setSelection(from, to)
       ),
 
+      // Search operations
+      getSearchCursor: (
+        query: string | RegExp,
+        pos: Position | "cursor",
+        caseFold: boolean
+      ) => {
+        return new SearchCursor(query, pos, self, caseFold);
+      },
+
       // Line operations
       lineCount: () => this.lines.length,
       getLine: (line: number) => this.lines[line]?.text,
@@ -1652,60 +1662,6 @@ export class AscendEditor {
   }
 }
 
-/**
- * Wrap API functions as operations
- *
- * This code transforms AscendEditor's internal API methods (those prefixed with $) into operation wrapped public methods.
- * The wrapping ensures that complex operations are properly batched for performance and consistent state management.
- *
- * Operation wrapping is critical because it
- * 1. Batches DOM updates for better performance.
- * 2. Ensures the editor state remains consistent.
- * 3. Prevents unnecessary redraws during multi-step operations.
- * 4. Handles event dispatching at appropriate times.
- */
-const proto = AscendEditor.prototype;
-
-/**
- * Transforms an internal API method into a public operation-wrapped method
- *
- * This function takes an internal method name (prefixed with '$') and creates a public version (without the '$' prefix)
- * that automatically wraps the method call within the startOperation() and endOperation() method.
- * @param name - The name of the internal API method (with '$' prefix)
- */
-function apiOp(name: string): void {
-  const f = (proto as any)[name];
-
-  // Create a new public method with the same name but without the `$` prefix.
-  (proto as any)[name.slice(1)] = function (
-    this: AscendEditor,
-    ...args: any[]
-  ): any {
-    // Begin an operation batch to optimize updates.
-    this.startOperation();
-
-    // Call the original method with all arguments and the correct 'this' context.
-    return f.apply(this, args);
-
-    // Complete the operation batch, triggering any necessary updates.
-    this.endOperation();
-  };
-}
-
-/**
- * Auto-wrap all internal API methods.
- *
- * Iterates through all properties of the AscendEditor prototype, identifying internal methods (those starting with '$')
- * and wrapping them with operation handling.
- *
- * This approach allows the codebase to maintain clear seperation b/w internal implementation detaild and the public API
- * while ensuring all public methods properly handle operation batching.
- */
-for (const n in proto) {
-  if (n.charAt(0) === "$") {
-    apiOp(n);
-  }
-}
 const currentPath = window.location.pathname;
 
 if (currentPath.includes("css")) {

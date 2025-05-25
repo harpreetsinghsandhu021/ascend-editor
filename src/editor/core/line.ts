@@ -1,6 +1,6 @@
-import { StringStream } from "../parsers/stringStream";
-import { textSpan } from "./dom";
-import { htmlEscape } from "./helpers";
+import { StringStream } from "../../parsers/stringStream";
+import { textSpan } from "../../utils/dom";
+import { htmlEscape } from "../../utils/helpers";
 
 /**
  * Represents a single line of code within the editor. Manages the display, selection and highlighting of text

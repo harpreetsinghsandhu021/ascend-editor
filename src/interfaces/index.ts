@@ -20,3 +20,9 @@ export interface Change {
   added: number;
   old: string[];
 }
+
+export interface SearchPosition {
+  from: Position;
+  to: Position;
+  match?: RegExpMatchArray;
+}
