@@ -19,6 +19,11 @@ import { Timer } from "./utils/timer.ts";
 import { cssParser } from "./mode/css/index.ts";
 import { History } from "./editor/history/history.ts";
 
+// Counter to track nested operation depth.
+// Helps manage concurrent or nested editor operations.
+// Higher values indicate nested operation depth.
+let nestedOperation: number = 0;
+
 export class AscendEditor {
   div: HTMLDivElement;
   input: HTMLTextAreaElement;
@@ -126,17 +131,16 @@ export class AscendEditor {
     this.poll = new Timer();
     this.highlight = new Timer();
 
-    this.parser = AscendEditor.parsers[options.parser];
-    if (!this.parser) throw new Error("No parser found");
-
     this.lines = [];
+    this.setParser(options.parser);
+
     this.history = new History();
     const zero = { line: 0, ch: 0 };
 
     this.selection = { from: zero, to: zero, inverted: false };
     this.prevSelection = { from: zero, to: zero };
 
-    this.$setValue(options.value || "");
+    this.setValue(options.value || "");
     this.displaySelection();
     this.restartBlink();
     this.prepareInputArea();
@@ -188,7 +192,7 @@ export class AscendEditor {
     this.reducedSelection = { anchor: 0 };
   }
 
-  $setValue(code: string) {
+  setValue(code: string) {
     this.history = null;
     this.replaceLines(0, this.lines.length, code.split(/\r?\n/g));
     this.setCursor(0);
@@ -503,7 +507,7 @@ export class AscendEditor {
     const pos = this.clipPosition(this.mouseEventPos(e)!);
     this.setSelection(pos, pos);
 
-    this.$replaceSelection(text);
+    this.replaceSelection(text);
   }
 
   onKeyUp(e: AsEvent) {
@@ -972,6 +976,62 @@ export class AscendEditor {
   }
 
   /**
+   * Calculates the screen coordinates of the cursor or selection boundaries
+   * @param start - If true, get coords for selection start, else for selection end
+   * @returns Coordinates object with x, y and bottom y position
+   */
+  cursorCoords(start: boolean) {
+    /**
+     * Helper function to measure node position and dimensions
+     */
+    function measure(node: HTMLElement, offset: number) {
+      const off = eltOffset(node);
+      return {
+        x: off.left + offset,
+        y: off.top,
+        yBot: off.top + node.offsetHeight,
+      };
+    }
+
+    // First try to find the cursor element
+    const currNode = this.findCursor();
+    if (currNode) {
+      return measure(currNode as HTMLElement, 0);
+    }
+
+    // If no cursor, look for selected text
+    if (start) {
+      // Search from start of selection
+      let node = this.lines[this.selection.from.line].div.firstChild;
+      while (node) {
+        if (
+          (node as HTMLElement).className.includes("ascend-editor-selected")
+        ) {
+          return measure(node as HTMLElement, 0);
+        }
+
+        node = node.nextSibling;
+      }
+    } else {
+      // Search from end of selection
+      let node = this.lines[this.selection.to.line].div.lastChild;
+
+      while (node) {
+        if (
+          (node as HTMLElement).className.includes("ascend-editor-selected")
+        ) {
+          return measure(
+            node as HTMLElement,
+            (node as HTMLElement).offsetWidth
+          );
+        }
+
+        node = node.previousSibling;
+      }
+    }
+  }
+
+  /**
    * Clips a posiiton object to ensure it falls within the bounds of the editor content.
    *
    * This function takes a position object. It ensures that the line number is within the range of existing lines, and the character
@@ -984,12 +1044,13 @@ export class AscendEditor {
     // If it's greater than or equal to the number of lines, set it to the last line.
     pos.line = Math.max(0, Math.min(this.lines.length - 1, pos.line));
 
+    let ch = pos.ch;
     // Ensure the character position is within the range of characters in the line.
     // If it's negative, set it to 0 (the start of the line)
     // It it's greater than or equal to the length of the line's text, set it to the end of the line.
-    pos.ch = Math.max(0, Math.min(this.lines[pos.line].text!.length, pos.ch));
+    ch = Math.max(0, Math.min(this.lines[pos.line].text!.length, pos.ch));
 
-    return pos;
+    return ch == pos.ch ? pos : { line: pos.line, ch: ch };
   }
 
   /**
@@ -1033,40 +1094,108 @@ export class AscendEditor {
     sel.to = to;
   }
 
-  $replaceSelection(code: string, collapse?: "start" | "end") {
-    const lines = code.split(/\r?\n/g);
-    let sel = this.selection;
+  /**
+   * Replaces a range of text in the editor and adjusts selection positions accordingly.
+   * @param code - The new text to insert
+   * @param from - Starting position of the range to replace
+   * @param to - Ending position of the range
+   */
+  replaceRange(code: string, from: Position, to?: Position) {
+    // Ensure positions are within valid bounds
+    from = this.clipPosition(from);
+    to = to ? this.clipPosition(to) : from;
 
-    // Prepend the text before the selection start to the first new line
-    lines[0] = this.lines[sel.from.line].text!.slice(0, sel.from.ch) + lines[0];
+    // Perform hte actual text replacement and get the end position.
+    const end = this.replaceRange1(code, from, to);
 
-    // Store the character position at the end of the newly inserted last line before appending the rest of the orgiinal line.
-    // This is where the cursor will be if not collapsed.
-    let endCh = lines[lines.length - 1].length;
+    // Adjust the selection range based on the replacement.
+    this.setSelection(
+      adjustPos(this.selection.from),
+      adjustPos(this.selection.to)
+    );
 
-    // Append the text after the selection end from from the original line to the last new line
-    lines[lines.length - 1] += this.lines[sel.to.line].text!.slice(sel.to.ch);
+    /**
+     * Adjusts a position based on the text replacement.
+     * Handles three cases:
+     * 1. Position before replacement range - unchanged
+     * 2. Position within replacement range - moves to end of replacement
+     * 3. Position after replacement - adjusted for change in text length
+     * @param pos
+     */
+    function adjustPos(pos: Position): Position {
+      if (positionLess(pos, from)) return pos;
 
-    // Determine the final 'from' and 'to' positions for the selection after replacement
-    let finalFromPos: Position = sel.from;
+      if (positionLess(pos, to!)) return end;
 
-    let finalToPos: Position = {
-      line: sel.from.line + lines.length - 1,
-      ch: endCh,
-    };
+      // Position is on the same line as replacement end
+      if (pos.line == to?.line) {
+        return {
+          line: pos.line,
+          ch: pos.ch + to.ch - end.ch,
+        };
+      }
 
-    // Replace the selected line with the new lines
-    this.replaceLines(sel.from.line, sel.to.line + 1, lines);
-
-    if (collapse === "end") {
-      // If collapse is "end", move the cursor (both from and to) to the end of the inserted text
-      finalFromPos = finalToPos;
-    } else if (collapse === "start") {
-      // If collapse is "start", move the cursor (both from and to) to the start of the inserted text
-      finalToPos = finalFromPos;
+      // Position is after replacement - adjusts line number
+      return {
+        line: pos.line + to!.line - end.line,
+        ch: pos.ch,
+      };
     }
+  }
 
-    this.setSelection(finalFromPos, finalToPos);
+  /**
+   * Core text replacement function that handles the actual modification of text content.
+   * Splits mutlti-line replacements and handles partial line replacement correctly.
+   * @param code - The new text to insert
+   * @param from - Starting position of replacement
+   * @param to - Position object indicating the end of the inserted text
+   */
+  replaceRange1(code: string, from: Position, to: Position): Position {
+    // Split replacement text into lines
+    let splittedText = code.split(/\r?\n/g);
+
+    // Preserve text before replacement in the first line
+    splittedText[0] =
+      this.lines[from.line].text?.slice(0, from.ch) + splittedText[0];
+
+    // Store the length of the last inserted line
+    const endCh = splittedText[splittedText.length - 1].length;
+
+    // Preserce text after replacement in last line
+    splittedText[splittedText.length - 1] += this.lines[to.line].text?.slice(
+      to.ch
+    );
+
+    // Calculate the change in number of lines
+    const diff = splittedText.length - (to.line - from.line + 1);
+
+    // Update the affected lines
+    this.updateLines(from.line, to.line + 1, splittedText);
+
+    return { line: to.line + diff, ch: endCh };
+  }
+
+  /**
+   * Replaces the current selection with new text and optionally collapses the selection.
+   * @param code - The text to insert at the current selection
+   * @param collapse - Optional direction to collapse the selection
+   */
+  replaceSelection(code: string, collapse?: "start" | "end") {
+    // Replace the selected text
+    const end = this.replaceRange1(
+      code,
+      this.selection.from,
+      this.selection.to
+    );
+
+    // Handle selection collapse based on the collapse parameter
+    if (collapse == "end") {
+      this.setSelection(end, end);
+    } else if (collapse == "start") {
+      this.setSelection(this.selection.from, this.selection.from);
+    } else {
+      this.selection.from, end;
+    }
   }
 
   /**
@@ -1074,8 +1203,38 @@ export class AscendEditor {
    * After inserting the newline, it attempts to indent the newly created line.
    */
   insertNewLine() {
-    this.$replaceSelection("\n", "end");
+    this.replaceSelection("\n", "end");
     this.indentLine(this.selection.from.line);
+  }
+
+  /**
+   * Retrieves the selected text from the editor.
+   * @param lineSep - Optional seperator for concatenating multiple lines (defaults to "\n")
+   * @returns The selected text as a string
+   */
+  getSelection(lineSep?: string): string {
+    const { from, to } = this.selection;
+
+    // If a selection is within a single line
+    if (from.line == to.line) {
+      return this.lines[from.line].text!.slice(from.ch, to.ch);
+    }
+
+    // For multi-line selections:
+    const selectedText = [
+      // First line (from selections start to end of line)
+      this.lines[from.line].text?.slice(from.ch),
+    ];
+
+    // Middle lines
+    for (let i = from.line + 1; i < to.line; i++) {
+      selectedText.push(this.lines[i].text);
+    }
+
+    // Last line
+    selectedText.push(this.lines[to.line].text?.slice(0, to.ch));
+
+    return selectedText.join(lineSep || "\n");
   }
 
   /**
@@ -1087,6 +1246,27 @@ export class AscendEditor {
     for (let i = sel.from.line; i <= sel.to.line; i++) {
       this.indentLine(i);
     }
+  }
+
+  /**
+   * Sets the parser for syntax highlighting and resets line states
+   * @param parserName - Name of the parser to use
+   * @throws Error if the parser is not found
+   */
+  setParser(parserName: string): void {
+    this.parser = AscendEditor.parsers[parserName];
+
+    if (!this.parser) {
+      throw new Error(`Parser '${parserName}' not found`);
+    }
+
+    // Reset state for all lines
+    for (let i = 0; i < this.lines.length; i++) {
+      this.lines[i].stateAfter = null;
+    }
+
+    // Reset work queue to start highlighting from beginning.
+    this.work = [0];
   }
 
   /**
@@ -1192,7 +1372,7 @@ export class AscendEditor {
       let task = this.work.pop()!;
 
       // Skip lines that have already been highlighted
-      if (this.lines[task].stateAfter) continue;
+      if (task >= this.lines.length || this.lines[task].stateAfter) continue;
 
       let state: any;
 
@@ -1353,26 +1533,113 @@ export class AscendEditor {
     // Store a reference to 'this' for use within the returned function.
     let self = this;
 
-    // If "f" is a string, assume it's a method name and get the actual function.
-    if (typeof f == "string") {
-      f = this[f];
-    }
-
     // Return a new function that wraps the original function.
     return function () {
-      // Prepare for the operation.
-      self.startOperation();
-      // Apply the original function "f" to the current context "self" with the provided arguments.
-      let result = f.apply(self, arguments);
-      // Finalize the operation.
-      self.endOperation();
+      // Start operation only for the outermost call
+      if (nestedOperation === 0) {
+        self.startOperation();
+      }
+      nestedOperation++;
 
-      return result; // Return the result of the original function.
+      try {
+        // Prepare for the operation.
+        // Apply the original function "f" to the current context "self" with the provided arguments.
+        let result = f.apply(self, arguments);
+        return result;
+      } finally {
+        nestedOperation--;
+        // End operation only when exiting the outermost call
+        if (nestedOperation === 0) {
+          // Finalize the operation.
+          self.endOperation();
+        }
+      }
     };
   }
 
+  /**
+   * Creates and returns a public API interdace for the editor instance
+   * @returns Object containing wrapped public methods
+   */
+  private createPublicInterface() {
+    const self = this;
+
+    return {
+      // Basic text operations
+      getValue: () => this.getValue(),
+      setValue: () => this.operation((text: string) => this.setValue(text)),
+      getSelection: (lineSep?: string) => this.getSelection(lineSep),
+      replaceSelection: this.operation(
+        (code: string, collapse?: "start" | "end") =>
+          this.replaceSelection(code, collapse)
+      ),
+
+      // Cursor and selection operations
+      getCursor: (start: boolean = false) => {
+        const pos = start ? this.selection.from : this.selection.to;
+        return { line: pos.line, ch: pos.ch };
+      },
+      setCursor: this.operation((line: number, ch: number) =>
+        this.setCursor(line, ch)
+      ),
+      setSelection: this.operation((from: Position, to: Position) =>
+        this.setSelection(from, to)
+      ),
+
+      // Line operations
+      lineCount: () => this.lines.length,
+      getLine: (line: number) => this.lines[line]?.text,
+      setLine: this.operation((line: number, text: string) => {
+        if (line >= 0 && line < this.lines.length) {
+          this.replaceRange(
+            text,
+            { line, ch: 0 },
+            { line, ch: this.lines[line].text?.length! }
+          );
+        }
+      }),
+      removeLine: this.operation((line: number) => {
+        if (line >= 0 && line < this.lines.length) {
+          this.replaceRange("", { line, ch: 0 }, { line: line + 1, ch: 0 });
+        }
+      }),
+
+      // History operations
+      undo: this.operation(() => this.undo()),
+      redo: this.operation(() => this.redo()),
+
+      // Parser operations
+      setParser: (name: string) => this.setParser(name),
+
+      // Focus operations
+      focus: () => {
+        this.input.focus();
+        this.onFocus();
+      },
+
+      // Utility operations
+      cursorCoords: (start: boolean) => this.cursorCoords(start),
+
+      // Operation wrapper
+      operation: (f: Function) => this.operation(f)(),
+
+      // Direct access to editor instance (if needed)
+      getEditor: () => self,
+    };
+  }
+
+  /**
+   * Creates a new editor instance
+   * @param place  - DOM element or function to place editor
+   * @param options - Editor configuration options
+   * @returns Public interface for the editor
+   */
+  static createEditor(place: HTMLElement | Function, options: any = {}) {
+    const editorInstance = new AscendEditor(place, options);
+    return editorInstance.createPublicInterface();
+  }
+
   lineHeight() {
-    let firstLine = this.lines[0];
     return this.lines[0].div.offsetHeight;
   }
 
@@ -1478,7 +1745,7 @@ AscendEditor.fromTextArea = function (textarea, options) {
     // beofore the form is submitted.
     function wrappedSubmit() {
       // Update the textarea with the editor's current content.
-      updateField();
+      // updateField();
       // Restore the original submit function.
       textarea.form!.submit = realSubmit;
       textarea.form?.submit();
