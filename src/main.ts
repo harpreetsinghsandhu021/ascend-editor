@@ -80,6 +80,7 @@ export class AscendEditor {
     workTime: 200,
     workDelay: 300,
     undoDepth: 40,
+    readOnly: false,
   };
   options: { [key: string]: any } = {};
 
@@ -89,9 +90,11 @@ export class AscendEditor {
 
     for (let opt in defaults) {
       if (defaults.hasOwnProperty(opt) && !options.hasOwnProperty(opt)) {
-        this.options[opt] = options[opt] = defaults[opt];
+        options[opt] = defaults[opt];
       }
     }
+
+    this.options = options;
 
     const div = (this.div = document.createElement("div"));
     if (place.appendChild) {
@@ -133,7 +136,7 @@ export class AscendEditor {
     this.highlight = new Timer();
 
     this.lines = [];
-    this.setParser(options.parser);
+    this.setParser(this.options.parser);
 
     this.history = new History();
     const zero = { line: 0, ch: 0 };
@@ -424,7 +427,10 @@ export class AscendEditor {
       this.updateInput = true;
     }
     this.textChanged = true;
+    this.updateLineNumbers();
+  }
 
+  updateLineNumbers() {
     let lineNumbers = this.lineNumbers;
     let length = this.lines.length;
 
@@ -439,6 +445,35 @@ export class AscendEditor {
         let num = lineNumbers.appendChild(document.createElement("div"));
         num.innerHTML = `${nums++ + this.options.firstLineNumber}`;
       }
+    }
+  }
+
+  /**
+   * Toggles the visibility and state of line numbers in the editor. This function is
+   * responsible for creating or removing the line number DOM element based on the desired
+   * state and udpating the editor's options.
+   *
+   * @param on - A boolean value indicating the desired state of line numbers.
+   */
+  setLineNumbers(on: boolean) {
+    // Check if the curent state of line numbers is different from the desired state.
+    // This prevents unecessary DOM manipulations and function calls if the line numbers are
+    // already in the requested state.
+    if (!this.options.lineNumbers != !on) {
+      this.options.lineNumbers = on;
+    }
+
+    if (on) {
+      const newLineNumbersElement = document.createElement("div");
+      newLineNumbersElement.className = "ascend-editor-line-numbers";
+      this.code.insertBefore(newLineNumbersElement, this.code.firstChild);
+      this.updateLineNumbers();
+    } else {
+      if (this.lineNumbers) {
+        this.code.removeChild(this.lineNumbers);
+      }
+
+      this.lineNumbers = undefined;
     }
   }
 
@@ -503,7 +538,7 @@ export class AscendEditor {
       text = "";
     }
 
-    if (!text) return;
+    if (!text || this.options.readOnly) return;
 
     const pos = this.clipPosition(this.mouseEventPos(e)!);
     this.setSelection(pos, pos);
@@ -530,44 +565,60 @@ export class AscendEditor {
 
     const key = event.key;
     const ctrl = event.ctrlKey && !event.altKey;
+    let done = false;
+
+    console.log(key, this.options);
 
     // Handle page up/down keys
     if (key === "PageUp" || key === "PageDown") {
       this.scrollPage(key === "PageDown");
-      e.stop();
+      done = true;
 
       // Handle ctrl-home/end keys
     } else if (ctrl && (key === "Home" || key === "End")) {
       this.scrollEnd(key === "Home");
-      e.stop();
+      done = true;
 
       // Handle ctrl-a (select all)
     } else if (ctrl && key === "a") {
       this.selectAll();
-      e.stop();
+      done = true;
       //
       // Handle shift key (for shift selecting)
-    } else if (!ctrl && key === "Enter") {
-      this.insertNewLine();
-      e.stop();
-    } else if (!ctrl && key === "Tab") {
-      this.handleTab();
-      e.stop();
-    } else if (key === "Shift") {
+    } else if (event.shiftKey) {
       this.shiftSelecting = this.selection.inverted
         ? this.selection.to
         : this.selection.from;
-    } else {
-      // Handle other keys
-      let id = (ctrl ? "c" : "") + key;
-
-      if (this.selection.inverted && movementKeys[id]) {
-        this.reducedSelection = { anchor: this.input.selectionStart };
-        this.input.selectionEnd = this.input.selectionStart;
+    } else if (!this.options.readOnly) {
+      if (!ctrl && key === "Enter") {
+        this.insertNewLine();
+        done = true;
+      } else if (!ctrl && key === "Tab") {
+        this.handleTab();
+        done = true;
+      } else if (ctrl && key === "z") {
+        this.undo();
+        done = true;
+      } else if ((ctrl && event.shiftKey && key === "z") || key === "y") {
+        this.redo();
+        done = true;
       }
-
-      this.fastPoll(20, id);
     }
+
+    if (done) {
+      e.stop();
+      return;
+    }
+
+    // Handle other keys
+    let id = (ctrl ? "c" : "") + key;
+
+    if (this.selection.inverted && movementKeys[id]) {
+      this.reducedSelection = { anchor: this.input.selectionStart };
+      this.input.selectionEnd = this.input.selectionStart;
+    }
+
+    this.fastPoll(20, id);
   }
   onFocus() {
     this.focused = true;
@@ -684,6 +735,15 @@ export class AscendEditor {
 
     // If nothing has changed, exit early.
     if (!moved) return false;
+
+    if (changed) {
+      this.shiftSelecting = null;
+      this.reducedSelection = null;
+      if (this.options.readOnly) {
+        this.updateInput = true;
+        return "changed";
+      }
+    }
 
     // Split text into lines for position calculations.
     let lines = text.split("\n");
@@ -1614,6 +1674,9 @@ export class AscendEditor {
         }
       }),
 
+      // Line number operations
+      setLineNumbers: this.setLineNumbers,
+
       // History operations
       undo: this.operation(() => this.undo()),
       redo: this.operation(() => this.redo()),
@@ -1625,6 +1688,10 @@ export class AscendEditor {
       focus: () => {
         this.input.focus();
         this.onFocus();
+      },
+
+      setReadOnly: (on: boolean) => {
+        this.options.readOnly = on;
       },
 
       // Utility operations
