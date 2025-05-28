@@ -117,7 +117,7 @@ export class AscendEditor {
     const textarea = (this.input = div.querySelector(
       "textarea"
     ) as HTMLTextAreaElement);
-    this.code = div.lastChild as HTMLDivElement;
+    const code = (this.code = div.lastChild as HTMLDivElement);
     this.measure = this.code.querySelector("span") as HTMLSpanElement;
     this.space = this.code.lastChild;
     this.visible = this.space!.firstChild;
@@ -140,7 +140,6 @@ export class AscendEditor {
     this.prevSelection = { from: zero, to: zero };
 
     this.setValue(options.value || "");
-    this.displaySelection();
     this.restartBlink();
     this.prepareInputArea();
 
@@ -323,8 +322,8 @@ export class AscendEditor {
     from: number,
     to: number,
     newText: string[],
-    selFrom: number,
-    selTo: number
+    selFrom: Position,
+    selTo: Position
   ) {
     let lines = this.lines;
 
@@ -370,8 +369,8 @@ export class AscendEditor {
     from: number,
     to: number,
     newText: string[],
-    selFrom: number,
-    selTo: number
+    selFrom: Position,
+    selTo: Position
   ) {
     let lines = this.lines;
     // Calculate the difference in number of lines b/w old and new content
@@ -815,7 +814,7 @@ export class AscendEditor {
     }
   }
 
-  updateDisplay(scroll) {
+  updateDisplay(scroll?: boolean) {
     (this.space as HTMLElement).style.height =
       this.lines.length * this.lineHeight() + "px";
     if (scroll !== false) {
@@ -1010,89 +1009,9 @@ export class AscendEditor {
     }
   }
 
-  /**
-   * Displays the current text selection visually in the editor.
-   *
-   * This function is responsible for updating the visual representation of the text in the editor. It handles various cases, such as
-   * single-position selection, multi-line selection and selection range changes. It also manages the cursor visibility and position, as
-   * well as scrolling the editor to ensure the selection is visible.
-   */
-  displaySelection() {
-    const sel = this.selection;
-    const pr = this.prevSelection;
-
-    if (
-      positionEqual(this.prevSelection.from, this.selection.from) &&
-      positionEqual(this.prevSelection.to, this.selection.to)
-    ) {
-      return;
-    }
-
-    // Clears the selection from lines that were part of the previous selection.
-    for (
-      let i = pr.from.line,
-        e = Math.min(this.lines.length, sel.from.line, pr.to.line + 1);
-      i < e;
-      i++
-    ) {
-      this.lines[i].setSelection(null, null);
-    }
-
-    // Clears the selection from lines that are not part of the previous selection by are part of the current selection.
-    for (
-      let i = Math.max(sel.to.line + 1, pr.from.line),
-        e = Math.min(pr.to.line, this.lines.length);
-      i <= e;
-      i++
-    ) {
-      this.lines[i].setSelection(null, null);
-    }
-
-    // Sets the selection for a single-line selection.
-    if (sel.from.line === sel.to.line) {
-      this.lines[sel.from.line].setSelection(sel.from.ch, sel.to.ch);
-    } else {
-      // Sets the selection for a multi-line selection
-      this.lines[sel.from.line].setSelection(sel.from.ch, null);
-      for (let i = sel.from.line + 1; i < sel.to.line; i++) {
-        this.lines[i].setSelection(0, null);
-      }
-      this.lines[sel.to.line].setSelection(0, sel.to.ch);
-    }
-
-    // Determines the head of the selection (start or end, depending on inversion) and
-    // gets the corresponding line's div.
-    let head = sel.inverted ? sel.from : sel.to;
-    let headLine = this.lines[head.line].div;
-    // Calculate the vertical position of the selection's first line
-    let yPos = headLine.offsetTop;
-    let line = this.lineHeight();
-    let screen = this.code.clientHeight;
-    let screenTop = this.code.scrollTop;
-
-    // Scroll the code area vertically to ensure the selection is visible
-    if (yPos < screenTop) {
-      this.code.scrollTop = Math.max(0, yPos - 10);
-    } else if (yPos + line > screenTop + screen) {
-      this.code.scrollTop = yPos + line + 10 - screen;
-
-      let xPos = head.ch * this.charWidth();
-      let screenWidth = headLine.offsetWidth;
-      let screenLeft = this.code.scrollLeft;
-
-      if (xPos < screenLeft) {
-        this.code.scrollLeft = Math.max(0, xPos - 10);
-      } else if (xPos > screenWidth + screenLeft) {
-        this.code.scrollLeft = xPos + 10 - screenWidth;
-      }
-    }
-  }
-
   findCursor() {
     if (positionEqual(this.selection.from, this.selection.to)) {
-      return this.lines[this.selection.from.line].div?.getElementsByClassName(
-        "ascend-editor-cursor"
-      )[0];
+      return this.code.getElementsByClassName("ascend-editor-cursor")[0];
     }
   }
 
@@ -1107,111 +1026,19 @@ export class AscendEditor {
     }, 650);
   }
 
-  /**
-   * Calculates the line and character position of a mouse event within the editor
-   * @param e - The mouse event object.
-   * @returns {{line: number, ch:number}}  - An object containing the line and character positions.
-   */
-  mouseEventPos(e: AsEvent): { line: number; ch: number } {
-    // Get the DOM element that was clicked and total number of lines
-    let target = e.target() as any;
-    let ln = this.lines.length;
+  posFromMouse(e: AsEvent) {
+    let off = eltOffset(this.space as HTMLElement);
+    let x = (e.e as MouseEvent).pageX - off.left;
+    let y = (e.e as MouseEvent).pageY - off.top;
 
-    // If clicked element is a span, use its parent div (line container)
-    // This handles clicks on syntax highlighted spans within lines
-    if (/span/i.test(target.nodeName)) target = target.parentNode;
-
-    // Handle clicks in the code area but below the last line
-    if (target == this.code) {
-      // Get the div containing the last line
-      let lastLine = this.lines[ln - 1].div;
-      // Calculate vertical offset from last line's top
-      let y =
-        (e.e as MouseEvent).pageY -
-        eltOffset(lastLine.firstChild as HTMLElement).top;
-
-      // If click is below the last line's height,
-      // return position at end of last line
-      if (y > lastLine.offsetHeight) return { line: ln - 1, ch: 0 };
-    } else if (target.parentNode == this.code) {
-      // Handle clicks directly on line divs
-      // Linear search through all lines to find clicked div
-      // TODO: Optimize for large documents - O(n) complexity
-
-      // Calculate horizontal position in characters
-      let x = eltOffset(target.firstChild).left; // Left edge of first child
-      let mx = (e.e as MouseEvent).pageX; // Mouse x position
-      let cw = this.charWidth(); // Width of one character
-      let ch = Math.round((mx - x) / cw);
-
-      for (let i = 0; i < ln; i++) {
-        let line = this.lines[i];
-
-        if (line.div == target) {
-          // Special handling for lines contaning tabs
-          if (line.text?.lastIndexOf("\t", ch)! > -1) {
-            // If clicked the line div itself, return end of line.
-            if (target == e.e.target) {
-              return { line: i, ch: line.text?.length! };
-            }
-
-            // Iterate through child nodes to find exact position.
-            let pos = 0;
-
-            for (let n = line.div.firstChild; n; n = n.nextSibling) {
-              let value = n.firstChild?.nodeValue;
-              let width = (n as HTMLElement).offsetWidth;
-
-              // Skip zero-width markers
-              if (value == "\u200b") continue;
-
-              // Found the node containing click position
-              if (x + width > mx) {
-                let tab = value?.indexOf("\t")!;
-                let ch = Math.round((mx - x) / cw);
-
-                // If no tab or click before tab, return simple offset
-                if (tab == -1 || tab >= ch) {
-                  return { line: i, ch: pos + ch };
-                }
-
-                // Handle click inside tab by splitting into individual characters.
-                try {
-                  // Create span for each character to measure exact widths
-                  let html = [];
-                  for (let j = 0; j < value?.length!; j++) {
-                    html.push(`<span>${htmlEscape(value?.charAt(j)!)}</span>`);
-                  }
-                  (n as HTMLElement).innerHTML = html.join("");
-
-                  // Find exact character position by measuring spans.
-                  for (let j = n.firstChild; j; j = j.nextSibling) {
-                    let width = (n as HTMLElement).offsetWidth;
-                    if (x + width > mx) {
-                      return {
-                        line: i,
-                        ch: pos + Math.round((mx - x) / width),
-                      };
-                    }
-                    pos++;
-                    x += width;
-                  }
-                } finally {
-                  // Restore original node content
-                  (n as HTMLElement).innerHTML = htmlEscape(value!);
-                }
-              }
-              pos += value?.length!;
-              x += width;
-            }
-          }
-
-          return { line: i, ch: Math.min(line.text?.length!, ch) };
-        }
-      }
+    if (e.target() == code && y < this.lines.length * this.lineHeight()) {
+      return null;
     }
 
-    return { line: 0, ch: 0 };
+    return this.clipPosition({
+      line: Math.floor(y / this.lineHeight()),
+      ch: Math.round(x / this.charWidth()),
+    });
   }
 
   /**
@@ -1242,60 +1069,27 @@ export class AscendEditor {
     this.setSelection(pos, pos);
   }
 
+  localCursorCoords(start: boolean) {
+    let head = start ? this.selection.from : this.selection.to;
+    return {
+      x: head.ch * this.charWidth(),
+      y: head.line * this.lineHeight(),
+    };
+  }
+
   /**
    * Calculates the screen coordinates of the cursor or selection boundaries
    * @param start - If true, get coords for selection start, else for selection end
    * @returns Coordinates object with x, y and bottom y position
    */
   cursorCoords(start: boolean) {
-    /**
-     * Helper function to measure node position and dimensions
-     */
-    function measure(node: HTMLElement, offset: number) {
-      const off = eltOffset(node);
-      return {
-        x: off.left + offset,
-        y: off.top,
-        yBot: off.top + node.offsetHeight,
-      };
-    }
-
-    // First try to find the cursor element
-    const currNode = this.findCursor();
-    if (currNode) {
-      return measure(currNode as HTMLElement, 0);
-    }
-
-    // If no cursor, look for selected text
-    if (start) {
-      // Search from start of selection
-      let node = this.lines[this.selection.from.line].div.firstChild;
-      while (node) {
-        if (
-          (node as HTMLElement).className.includes("ascend-editor-selected")
-        ) {
-          return measure(node as HTMLElement, 0);
-        }
-
-        node = node.nextSibling;
-      }
-    } else {
-      // Search from end of selection
-      let node = this.lines[this.selection.to.line].div.lastChild;
-
-      while (node) {
-        if (
-          (node as HTMLElement).className.includes("ascend-editor-selected")
-        ) {
-          return measure(
-            node as HTMLElement,
-            (node as HTMLElement).offsetWidth
-          );
-        }
-
-        node = node.previousSibling;
-      }
-    }
+    let local = this.localCursorCoords(start);
+    let off = eltOffset(this.space as HTMLElement);
+    return {
+      x: off.left + local.x,
+      y: off.top + local.y,
+      yBot: off.top + local.y + this.lineHeight(),
+    };
   }
 
   /**
@@ -1324,7 +1118,7 @@ export class AscendEditor {
    * Sets the text selection range in the editor.
    *
    */
-  setSelection(from: Position, to: Position) {
+  setSelection(from: Position, to: Position, oldFrom: number, oldTo: number) {
     // Get the current selection object and the shift selecting state.
     let sel = this.selection;
     let sh = this.shiftSelecting;
@@ -1354,6 +1148,43 @@ export class AscendEditor {
       sel.inverted = true;
     } else if (endEq && !startEq) {
       sel.inverted = false;
+    }
+
+    if (oldFrom == null) {
+      oldFrom = sel.from.line;
+      oldTo = sel.to.line;
+    }
+
+    if (!positionEqual(from, sel.from)) {
+      if (from.line < oldFrom) {
+        this.changes.push({
+          from: from.line,
+          to: Math.min(to.line, oldFrom) + 1,
+          diff: 0,
+        });
+      } else {
+        this.changes.push({
+          from: oldFrom,
+          to: Math.min(oldTo, from.line) + 1,
+          diff: 0,
+        });
+      }
+    }
+
+    if (!positionEqual(to, sel.to)) {
+      if (to.line < oldTo) {
+        this.changes.push({
+          from: Math.max(oldFrom, from.line),
+          to: oldTo + 1,
+          diff: 0,
+        });
+      } else {
+        this.changes.push({
+          from: Math.max(from.line, oldTo),
+          to: to.line + 1,
+          diff: 0,
+        });
+      }
     }
 
     // Update the selection range
@@ -1759,33 +1590,21 @@ export class AscendEditor {
     let ps = this.prevSelection;
     let sel = this.selection;
 
-    // Check if the selection has changed by comparing the start and end positions.
-    const selectionChanged =
-      !positionEqual(this.prevSelection.from, sel.from) ||
-      !positionEqual(this.prevSelection.to, sel.to);
-
-    if (selectionChanged) {
+    if (this.changes.length) {
       // If the selection has changed, update the display to reflect the new selection.
-      this.displaySelection();
+      this.updateDisplay();
       this.restartBlink();
     }
 
     // Check if the selection spans multiple lines or if lines have been shifted.
-    if (
-      this.prevSelection.from.line != sel.from.line ||
-      this.prevSelection.to.line != sel.to.line ||
-      this.updateInput
-    ) {
+    if (this.updateInput || this.changes.length) {
       this.prepareInputArea();
     }
 
-    if (
-      (selectionChanged || this.textChanged) &&
-      this.options.onCursorActivity
-    ) {
+    if (this.changes.length && this.options.onCursorActivity) {
       this.options.onCursorActivity(AscendEditor);
     }
-    if (this.textChanged && this.options.onChange) {
+    if (this.changes.length && this.options.onChange) {
       this.options.onChange(AscendEditor);
     }
   }
@@ -1923,7 +1742,7 @@ export class AscendEditor {
   }
 
   lineHeight() {
-    return this.lines[0].div.offsetHeight;
+    return this.measure.offsetHeight || 1;
   }
 
   charWidth() {
