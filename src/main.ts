@@ -31,7 +31,10 @@ export class AscendEditor {
   code: HTMLDivElement;
   cursor: HTMLSpanElement;
   space: ChildNode | null
+  changes: {from: number, to:number, diff:number}[] = []
   visible: ChildNode | null
+  showingFrom: number = 0
+  showingTo: number = 0
   measure: HTMLSpanElement;
   lineNumbers?: HTMLDivElement;
   lines: Array<Line>;
@@ -306,12 +309,13 @@ export class AscendEditor {
     this.updateInput = true;
   }
   /**
+   * UpdateLines
    * Updates a range of lines in the editor with new text content.
    * @param from - The starting line index to update (zero-based)
    * @param to - The ending line index to update
    * @param newText - Array of strings representing the new text content for each line
    */
-  replaceLines(from: number, to: number, newText: string[]) {
+  replaceLines(from: number, to: number, newText: string[], selFrom:number, selTo: number) {
     let lines = this.lines;
 
     // Optimization 1: Skip unchanged lines at the beginning. If the first
@@ -348,10 +352,11 @@ export class AscendEditor {
       }
     }
     // Update the lines with new content.
-    this.updateLines(from, to, newText);
+    this.updateLines(from, to, newText, selFrom, selTo);
   }
 
-  updateLines(from: number, to: number, newText: string[]) {
+  // UpdatesLines1
+  updateLines(from: number, to: number, newText: string[], selFrom: number, selTo: number) {
     let lines = this.lines;
     // Calculate the difference in number of lines b/w old and new content
     const lenDiff = newText.length - (to - from);
@@ -359,26 +364,17 @@ export class AscendEditor {
     // Case 1: When new text has fewer lines than the range being replaced
     if (lenDiff < 0) {
       // Remove the extra lines from this.lines and their corresponding DIVs
-      const removed = lines.splice(from, -lenDiff);
-      for (let i = 0, l = removed.length; i < l; i++) {
-        removeElement(removed[i].div);
-      }
+     lines.splice(from, -lenDiff);
 
       // If the number of lines is greater than existing lines
     } else if (lenDiff > 0) {
       // Prepare the arguments for splicing new lines into this.lines
       const spliceArgs: Line[] = [];
-      const before = lines[from] ? lines[from].div : null;
 
       // Insert new DIVs before the DIV at the `from` index
       for (let i = 0; i < lenDiff; i++) {
-        const div = this.code.insertBefore(
-          document.createElement("div"),
-          before
-        );
-
         // Add empty lines to the splice arguments
-        spliceArgs.push(new Line(div, this));
+        spliceArgs.push(new Line(newText[i]));
       }
 
       lines.splice.apply(lines, [from, 0, ...spliceArgs]);
@@ -403,31 +399,16 @@ export class AscendEditor {
     this.work = newWork;
     this.startWorker(100);
 
-    let selLine = this.selection.from.line;
+    this.changes.push({from: from, to: to, diff: lenDiff})
 
-    if (lenDiff || from != selLine || to != selLine + 1) {
-      this.updateInput = true;
+    function updateLine(n:number){
+      return n <= Math.min(to, to + lenDiff) ? n : n + lenDiff
     }
-    this.textChanged = true;
-    this.updateLineNumbers();
-  }
 
-  updateLineNumbers() {
-    let lineNumbers = this.lineNumbers;
-    let length = this.lines.length;
+    this.showingFrom = updateLine(this.showingFrom)
+    this.showingTo = updateLine(this.showingTo)
+    this.setSelection(selFrom, selTo, updateLine(this.selection.from.line), updateLine(this.selection.to.line))
 
-    if (lineNumbers) {
-      let nums = lineNumbers.childNodes.length;
-      while (nums > length) {
-        lineNumbers.removeChild(lineNumbers.lastChild!);
-        nums--;
-      }
-
-      while (nums < length) {
-        let num = lineNumbers.appendChild(document.createElement("div"));
-        num.innerHTML = `${nums++ + this.options.firstLineNumber}`;
-      }
-    }
   }
 
   /**
@@ -480,8 +461,12 @@ export class AscendEditor {
         replaced.push(this.lines[i].text!);
       }
 
+      let pos = {
+        line: change.start + change.old.length - 1,
+        ch: editEnd(replaced[replaced.length - 1], change.old[change.old.length - 1]),
+      }
       // Apply the old text from the change record.
-      this.updateLines(change.start, end, change.old);
+      this.updateLines(change.start, end, change.old, pos, pos);
 
       // Create and push a reverse change to the destination stack
       to.push({
