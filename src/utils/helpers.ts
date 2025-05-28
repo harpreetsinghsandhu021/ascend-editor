@@ -24,6 +24,12 @@ export function eltOffset(node: HTMLElement): Offset {
     node = node.offsetParent as HTMLElement;
   }
 
+  while(node && node != document.body) {
+    x -= (node as HTMLElement).scrollLeft
+    y -= (node as HTMLElement).scrollTop
+    node = node.parentNode as HTMLElement
+  }
+
   return { left: x, top: y };
 }
 

@@ -7,6 +7,6 @@ export class Timer {
 
   set(ms: number, f: () => void) {
     clearTimeout(this.id as number);
-    setTimeout(f, ms);
+    this.id = setTimeout(f, ms);
   }
 }

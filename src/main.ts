@@ -567,7 +567,6 @@ export class AscendEditor {
     const ctrl = event.ctrlKey && !event.altKey;
     let done = false;
 
-    console.log(key, this.options);
 
     // Handle page up/down keys
     if (key === "PageUp" || key === "PageDown") {
