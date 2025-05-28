@@ -186,7 +186,8 @@ export class AscendEditor {
 
   setValue(code: string) {
     this.history = null;
-    this.replaceLines(0, this.lines.length, code.split(/\r?\n/g));
+    let top = {line:0, ch:0};
+    this.replaceLines(0, this.lines.length, code.split(/\r?\n/g), top, top);
     this.setCursor(0);
     this.history = new History();
   }
@@ -204,21 +205,12 @@ export class AscendEditor {
    * @param e - The mouse event object.
    */
   onMouseDown(e: AsEvent) {
-    let corner = eltOffset(this.code);
-
-    if (
-      (e.e as MouseEvent).pageX - corner.left > this.code.clientWidth ||
-      (e.e as MouseEvent).pageY - corner.top > this.code.clientHeight
-    ) {
-      return;
-    }
-
     let self = this;
     // Reset the shiftselecting property
     this.shiftSelecting = null;
 
     // Get the position of the mouse event.
-    let start = this.mouseEventPos(e);
+    let start = this.posFromMouse(e);
     let last = start;
 
     if (!start) return;
@@ -236,7 +228,7 @@ export class AscendEditor {
       "mousemove",
       this.operation((e: AsEvent) => {
         // Get the current cursor position based om the mouse event
-        let curr = this.clipPosition(this.mouseEventPos(e)!);
+        let curr = this.posFromMouse(e)!
 
         // If the cursor position has changed, update the selection.
         if (!positionEqual(curr, last!)) {
@@ -251,11 +243,11 @@ export class AscendEditor {
       window,
       "mouseup",
       this.operation((e: AsEvent) => {
+        let curr = this.posFromMouse(e)
         // Set the final selection based on the start and end positions
-        this.setSelection(
-          this.clipPosition(start),
-          this.clipPosition(this.mouseEventPos(e)!)
-        );
+        if (curr) {
+          this.setSelection(start, curr);
+        }
 
         end();
       }),
@@ -289,7 +281,9 @@ export class AscendEditor {
   }
 
   onDblClick(e: AsEvent) {
-    this.selectWordAt(this.clipPosition(this.mouseEventPos(e)!));
+    let pos = this.posFromMouse(e)
+    if (!pos) return
+    this.selectWordAt(posFromMouse)
     e.stop();
   }
 
