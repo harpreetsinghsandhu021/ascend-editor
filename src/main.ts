@@ -30,11 +30,12 @@ export class AscendEditor {
   input: HTMLTextAreaElement;
   code: HTMLDivElement;
   cursor: HTMLSpanElement;
-  space: ChildNode | null
-  changes: {from: number, to:number, diff:number}[] = []
-  visible: ChildNode | null
-  showingFrom: number = 0
-  showingTo: number = 0
+  updates: { from: number; to: number; size: number; at: number }[] = [];
+  space: ChildNode | null;
+  changes: { from: number; to: number; diff: number }[] = [];
+  visible: ChildNode | null;
+  showingFrom: number = 0;
+  showingTo: number = 0;
   measure: HTMLSpanElement;
   lineNumbers?: HTMLDivElement;
   lines: Array<Line>;
@@ -109,14 +110,17 @@ export class AscendEditor {
     }
     div.className = "ascend-editor";
 
-    div.innerHTML = '<textarea style="position: absolute; width: 10000px; left: -100000px; top: -100000px"></textarea>\
+    div.innerHTML =
+      '<textarea style="position: absolute; width: 10000px; left: -100000px; top: -100000px"></textarea>\
 <div class="ascend-editor-code"><span style="position: absolute; visibility: hidden">-</span>\
 <div style="position: relative"><div style="position: absolute; left: 0;"></div></div></div>';
-    const textarea = this.input = div.querySelector("textarea") as HTMLTextAreaElement;
+    const textarea = (this.input = div.querySelector(
+      "textarea"
+    ) as HTMLTextAreaElement);
     this.code = div.lastChild as HTMLDivElement;
     this.measure = this.code.querySelector("span") as HTMLSpanElement;
-    this.space = this.code.lastChild
-    this.visible = this.space!.firstChild
+    this.space = this.code.lastChild;
+    this.visible = this.space!.firstChild;
 
     // if (options.lineNumbers) {
     //   this.lineNumbers = code.appendChild(document.createElement("div"));
@@ -189,7 +193,7 @@ export class AscendEditor {
 
   setValue(code: string) {
     this.history = null;
-    let top = {line:0, ch:0};
+    let top = { line: 0, ch: 0 };
     this.replaceLines(0, this.lines.length, code.split(/\r?\n/g), top, top);
     this.setCursor(0);
     this.history = new History();
@@ -231,7 +235,7 @@ export class AscendEditor {
       "mousemove",
       this.operation((e: AsEvent) => {
         // Get the current cursor position based om the mouse event
-        let curr = this.posFromMouse(e)!
+        let curr = this.posFromMouse(e)!;
 
         // If the cursor position has changed, update the selection.
         if (!positionEqual(curr, last!)) {
@@ -246,7 +250,7 @@ export class AscendEditor {
       window,
       "mouseup",
       this.operation((e: AsEvent) => {
-        let curr = this.posFromMouse(e)
+        let curr = this.posFromMouse(e);
         // Set the final selection based on the start and end positions
         if (curr) {
           this.setSelection(start, curr);
@@ -284,9 +288,9 @@ export class AscendEditor {
   }
 
   onDblClick(e: AsEvent) {
-    let pos = this.posFromMouse(e)
-    if (!pos) return
-    this.selectWordAt(posFromMouse)
+    let pos = this.posFromMouse(e);
+    if (!pos) return;
+    this.selectWordAt(posFromMouse);
     e.stop();
   }
 
@@ -315,7 +319,13 @@ export class AscendEditor {
    * @param to - The ending line index to update
    * @param newText - Array of strings representing the new text content for each line
    */
-  replaceLines(from: number, to: number, newText: string[], selFrom:number, selTo: number) {
+  replaceLines(
+    from: number,
+    to: number,
+    newText: string[],
+    selFrom: number,
+    selTo: number
+  ) {
     let lines = this.lines;
 
     // Optimization 1: Skip unchanged lines at the beginning. If the first
@@ -356,7 +366,13 @@ export class AscendEditor {
   }
 
   // UpdatesLines1
-  updateLines(from: number, to: number, newText: string[], selFrom: number, selTo: number) {
+  updateLines(
+    from: number,
+    to: number,
+    newText: string[],
+    selFrom: number,
+    selTo: number
+  ) {
     let lines = this.lines;
     // Calculate the difference in number of lines b/w old and new content
     const lenDiff = newText.length - (to - from);
@@ -364,7 +380,7 @@ export class AscendEditor {
     // Case 1: When new text has fewer lines than the range being replaced
     if (lenDiff < 0) {
       // Remove the extra lines from this.lines and their corresponding DIVs
-     lines.splice(from, -lenDiff);
+      lines.splice(from, -lenDiff);
 
       // If the number of lines is greater than existing lines
     } else if (lenDiff > 0) {
@@ -399,16 +415,20 @@ export class AscendEditor {
     this.work = newWork;
     this.startWorker(100);
 
-    this.changes.push({from: from, to: to, diff: lenDiff})
+    this.changes.push({ from: from, to: to, diff: lenDiff });
 
-    function updateLine(n:number){
-      return n <= Math.min(to, to + lenDiff) ? n : n + lenDiff
+    function updateLine(n: number) {
+      return n <= Math.min(to, to + lenDiff) ? n : n + lenDiff;
     }
 
-    this.showingFrom = updateLine(this.showingFrom)
-    this.showingTo = updateLine(this.showingTo)
-    this.setSelection(selFrom, selTo, updateLine(this.selection.from.line), updateLine(this.selection.to.line))
-
+    this.showingFrom = updateLine(this.showingFrom);
+    this.showingTo = updateLine(this.showingTo);
+    this.setSelection(
+      selFrom,
+      selTo,
+      updateLine(this.selection.from.line),
+      updateLine(this.selection.to.line)
+    );
   }
 
   /**
@@ -463,8 +483,11 @@ export class AscendEditor {
 
       let pos = {
         line: change.start + change.old.length - 1,
-        ch: editEnd(replaced[replaced.length - 1], change.old[change.old.length - 1]),
-      }
+        ch: editEnd(
+          replaced[replaced.length - 1],
+          change.old[change.old.length - 1]
+        ),
+      };
       // Apply the old text from the change record.
       this.updateLines(change.start, end, change.old, pos, pos);
 
@@ -533,7 +556,6 @@ export class AscendEditor {
     const key = event.key;
     const ctrl = event.ctrlKey && !event.altKey;
     let done = false;
-
 
     // Handle page up/down keys
     if (key === "PageUp" || key === "PageDown") {
@@ -768,6 +790,224 @@ export class AscendEditor {
     this.setSelection(from, to);
 
     return changed ? "changed" : moved ? "moved" : false;
+  }
+
+  scrollCursorIntoView() {
+    let cursor = this.localCursorCoords(this.selection.inverted);
+    cursor.x += this.space.offsetLeft;
+    cursor.y += this.space.offsetTop;
+
+    let screen = this.code.clientHeight;
+    let screenTop = this.code.scrollTop;
+
+    if (cursor.y < screenTop) {
+      this.code.scrollTop = Math.max(0, cursor.y - 10);
+    } else if ((cursor.y += this.lineHeight()) > screenTop + screen) {
+      this.code.scrollTop = cursor.y + 10 - screen;
+    }
+
+    let screenWidth = (this.space as HTMLElement).offsetWidth;
+    let screenLeft = this.code.scrollLeft;
+    if (cursor.x < screenLeft) {
+      this.code.scrollLeft = Math.max(0, cursor.x - 10);
+    } else if (cursor.x > screenWidth + screenLeft) {
+      this.code.scrollLeft = cursor.x + 10 - screenWidth;
+    }
+  }
+
+  updateDisplay(scroll) {
+    (this.space as HTMLElement).style.height =
+      this.lines.length * this.lineHeight() + "px";
+    if (scroll !== false) {
+      this.scrollCursorIntoView();
+    }
+
+    let lh = this.lineHeight();
+    let top = this.code.scrollTop - (this.space as HTMLElement).offsetTop;
+    let visibleFrom = Math.max(0, Math.floor(top / lh));
+    let visibleTo = Math.min(
+      this.lines.length,
+      Math.ceil(top + this.div.clientHeight) / lh
+    );
+
+    let intact = [{ from: this.showingFrom, to: this.showingTo, at: 0 }];
+    for (let i = 0; i < this.changes.length; i++) {
+      let change = this.changes[i];
+      let intact2 = [];
+      for (let j = 0; j < intact.length; j++) {
+        let range = intact[j];
+
+        if (change.to <= range.from) {
+          intact2.push({
+            from: range.from + change.diff,
+            to: range.to + change.diff,
+            at: range.at,
+          });
+        } else if (range.to <= change.from) {
+          intact2.push(range);
+        } else {
+          if (change.from > range.from) {
+            intact2.push({
+              from: range.from,
+              to: change.from,
+              at: range.at,
+            });
+          } else {
+            intact2.push({
+              from: change.to + change.diff,
+              to: range.to + change.diff,
+              at: range.at + (change.to - range.from),
+            });
+          }
+        }
+      }
+      intact = intact2;
+    }
+
+    let from = Math.min(this.showingFrom, Math.max(visibleFrom - 2, 0));
+    let to = Math.max(
+      this.showingTo,
+      Math.min(visibleTo + 2, this.lines.length)
+    );
+
+    let updates = [];
+    let pos = from;
+    let at = from - showingFrom;
+    let changedLines = 0;
+
+    if (at > 0) {
+      this.updates.push({ from: pos, to: pos, size: at, at: 0 });
+    }
+
+    for (let i = 0; i < intact.length; i++) {
+      let range = intact[i];
+      if (range.to <= pos) continue;
+      if (range.from >= to) break;
+      if (range.from > pos) {
+        let size = range.at - at;
+        this.updates.push({ from: pos, to: range.from, size: size, at: at });
+        changeLines += size;
+      }
+
+      pos = range.to;
+      at = range.to + (range.to - range.from);
+    }
+
+    if (pos < to) {
+      let size = Math.max(0, this.showingTo - this.showingFrom);
+      changedLines += size;
+      this.updates.push({ from: pos, to: to, size: size, at: at });
+    }
+
+    if (!updates.length) return;
+    if (changedLines > (visibleTo - visibleFrom) * 0.3) {
+      this.refreshDisplay(visibleFrom, visibleTo);
+    } else {
+      this.patchDisplay(this.updates, from, to);
+    }
+  }
+
+  refreshDisplay(from: number, to: number) {
+    from = Math.max(from - 10, 0);
+    to = Math.min(to + 10, this.lines.length);
+
+    let html = [];
+    let start = { line: from, ch: 0 };
+    let inSel =
+      positionLess(this.selection.from, start) &&
+      !positionLess(this.selection.to, start);
+
+    for (let i = from; i < to; i++) {
+      let ch1 = null;
+      let ch2 = null;
+
+      if (inSel) {
+        ch1 = 0;
+        if (this.selection.to.line == i) {
+          inSel = false;
+          ch2 = this.selection.to.ch || null;
+        } else if (this.selection.from.line == i) {
+          if (this.selection.to.line == i) {
+            ch1 = this.selection.from.ch;
+            ch2 = this.selection.to.ch;
+          } else {
+            inSel = true;
+            ch1 = this.selection.from.ch;
+          }
+        }
+
+        html.push("<div>", this.lines[i].getHTML(ch1, ch2!), "</div>");
+      }
+
+      (this.visible as HTMLElement).innerHTML = html.join("");
+      this.showingFrom = from;
+      this.showingTo = to;
+      (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
+    }
+  }
+
+  patchDisplay(
+    updates: { from: number; to: number; size: number; at: number }[],
+    from: number,
+    to: number
+  ) {
+    let sfrom = this.selection.from.line;
+    let sto = this.selection.to.line;
+    let off = 0;
+
+    for (let i = 0; i < this.updates.length; i++) {
+      let rec = this.updates[i];
+
+      let extra = rec.to - rec.from - rec.size;
+
+      if (extra) {
+        let nodeAfter = this.visible?.childNodes[rec.at + off + rec.size];
+
+        for (let j = Math.max(0, -extra); j > 0; j--) {
+          this.visible?.removeChild(
+            nodeAfter ? nodeAfter.previousSibling! : this.visible.lastChild!
+          );
+
+          for (let j = Math.max(0, extra); j > 0; j--) {
+            this.visible?.insertBefore(
+              document.createElement("div"),
+              nodeAfter!
+            );
+          }
+        }
+
+        let node = this.visible?.childNodes[rec.at + off];
+        let inSel = sfrom < rec.from && sto >= rec.from;
+
+        for (let j = rec.from; j < rec.to; j++) {
+          let ch1 = null;
+          let ch2 = null;
+          if (inSel) {
+            ch1 = 0;
+            if (sto == j) {
+              inSel = false;
+              ch2 = this.selection.to.ch || null;
+            }
+          } else if (sfrom == j) {
+            if (sto == j) {
+              ch1 = this.selection.from.ch;
+              ch2 = this.selection.to.ch;
+            } else {
+              inSel = true;
+              ch1 = this.selection.from.ch;
+            }
+          }
+
+          (node as HTMLElement).innerHTML = this.lines[j].getHTML(ch1!, ch2!);
+          node = node?.nextSibling!;
+        }
+        off += extra;
+      }
+
+      this.showingFrom = from;
+      this.showingTo = to;
+      (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
+    }
   }
 
   /**
