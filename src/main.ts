@@ -30,6 +30,8 @@ export class AscendEditor {
   input: HTMLTextAreaElement;
   code: HTMLDivElement;
   cursor: HTMLSpanElement;
+  space: ChildNode | null
+  visible: ChildNode | null
   measure: HTMLSpanElement;
   lineNumbers?: HTMLDivElement;
   lines: Array<Line>;
@@ -104,33 +106,19 @@ export class AscendEditor {
     }
     div.className = "ascend-editor";
 
-    const textarea = (this.input = div.appendChild(
-      document.createElement("textarea")
-    ));
-    textarea.style.position = "absolute";
-    textarea.style.width = "10000px";
-    textarea.style.top = "-100000px";
-    textarea.style.left = "-100000px";
-    // textarea.style.height = "10em";
-    textarea.style.fontSize = "18px";
+    div.innerHTML = '<textarea style="position: absolute; width: 10000px; left: -100000px; top: -100000px"></textarea>\
+<div class="ascend-editor-code"><span style="position: absolute; visibility: hidden">-</span>\
+<div style="position: relative"><div style="position: absolute; left: 0;"></div></div></div>';
+    const textarea = this.input = div.querySelector("textarea") as HTMLTextAreaElement;
+    this.code = div.lastChild as HTMLDivElement;
+    this.measure = this.code.querySelector("span") as HTMLSpanElement;
+    this.space = this.code.lastChild
+    this.visible = this.space!.firstChild
 
-    const code = (this.code = div.appendChild(document.createElement("div")));
-    code.className = "ascend-editor-code";
-
-    this.cursor = document.createElement("span");
-    this.cursor.className = "ascend-editor-cursor";
-    this.cursor.innerHTML = "&nbsp;";
-    // this.cursor.style.visibility = "none";
-
-    this.measure = code.appendChild(document.createElement("span"));
-    this.measure.style.position = "absolute";
-    this.measure.style.visibility = "hidden";
-    this.measure.innerHTML = "-";
-
-    if (options.lineNumbers) {
-      this.lineNumbers = code.appendChild(document.createElement("div"));
-      this.lineNumbers.className = "ascend-editor-line-numbers";
-    }
+    // if (options.lineNumbers) {
+    //   this.lineNumbers = code.appendChild(document.createElement("div"));
+    //   this.lineNumbers.className = "ascend-editor-line-numbers";
+    // }
 
     this.poll = new Timer();
     this.highlight = new Timer();
@@ -883,7 +871,7 @@ export class AscendEditor {
 
   findCursor() {
     if (positionEqual(this.selection.from, this.selection.to)) {
-      return this.lines[this.selection.from.line].div.getElementsByClassName(
+      return this.lines[this.selection.from.line].div?.getElementsByClassName(
         "ascend-editor-cursor"
       )[0];
     }

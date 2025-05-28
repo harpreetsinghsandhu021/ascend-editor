@@ -1,6 +1,7 @@
 import { StringStream } from "../../parsers/stringStream";
 import { textSpan } from "../../utils/dom";
 import { htmlEscape } from "../../utils/helpers";
+import type {Position} from "../../interfaces";
 
 /**
  * Represents a single line of code within the editor. Manages the display, selection and highlighting of text
@@ -25,10 +26,10 @@ export class Line {
   // Stores the styles of the line.
   public styles: (string | null)[];
 
-  constructor(div: HTMLElement, parent: any) {
-    this.div = div;
-    this.parent = parent;
-    this.styles = [];
+  constructor(text: string) {
+    this.text = text;
+    this.stateAfter = null
+    this.styles = [text, null];
   }
 
   /**
@@ -81,21 +82,6 @@ export class Line {
     }
 
     this.stateAfter = null;
-    this.updateDOM();
-  }
-
-  /**
-   * Sets the selection range within the line.
-   *
-   * @param from - The starting character position of the selection.
-   * @param to - The ending character position of the selection. If null, the selection extends to the end of the line.
-   */
-  setSelection(from: number | null, to: number | null): void {
-    if (this.selFrom !== from || this.selTo !== to) {
-      this.selFrom = from;
-      this.selTo = to;
-      this.updateDOM();
-    }
   }
 
   /**
@@ -128,21 +114,17 @@ export class Line {
         this.styles.push(style);
       }
     }
-    this.updateDOM();
   }
 
   /**
    * Updates the DOM to reflect the current text content, styles, and selection.
    */
-  updateDOM() {
+  getHTML(sfrom:number, sto:number) {
     const html: string[] = [];
     const st = this.styles;
     let pos = 0;
     let node = 0;
-    const sfrom = this.selFrom;
-    const sto = this.selTo;
     let sel = sfrom === null ? 2 : 0;
-    let currAt: number | undefined;
 
     /**
      * Adds a piece of text to the HTML, applying the correct style and handling selection.
@@ -196,9 +178,9 @@ export class Line {
 
       // Open the span tag, add the class, text and close the span.
       html.push(
-        "<span" +
-          (cls ? ' class="' + cls + '">' : ">") +
-          htmlEscape(cut === null ? text : text.slice(0, cut)) +
+        "<span",
+          (cls ? ' class="' + cls + '">' : ">"),
+          htmlEscape(cut === null ? text : text.slice(0, cut)),
           "</span>"
       );
 
@@ -233,6 +215,6 @@ export class Line {
     }
 
     // Set the inner HTML of the div with the generated HTML.
-    this.div.innerHTML = html.join("");
+   return html.join("");
   }
 }
