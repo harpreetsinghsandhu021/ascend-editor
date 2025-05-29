@@ -36,6 +36,7 @@ export class AscendEditor {
   showingTo: number = 0;
   measure: HTMLSpanElement;
   lineNumbers?: HTMLDivElement;
+  selectionChanged: any;
   lines: Array<Line>;
   selection: { from: Position; to: Position; inverted?: boolean };
   prevSelection: { from: Position; to: Position };
@@ -111,14 +112,15 @@ export class AscendEditor {
     div.innerHTML =
       '<textarea style="position: absolute; width: 10000px; left: -100000px; top: -100000px;"></textarea>\
 <div class="ascend-editor-code"><span style="position: absolute; visibility: hidden">-</span>\
-<div style="position: relative"><div style="position: absolute; left: 0;"></div></div></div>';
+<div style="position: relative"><span class="ascend-editor-cursor"> </span><div style="position: absolute; left: 0;"></div></div></div>';
     const textarea = (this.input = div.querySelector(
       "textarea"
     ) as HTMLTextAreaElement);
     const code = (this.code = div.lastChild as HTMLDivElement);
     this.measure = code.firstChild as HTMLSpanElement;
-    this.space = code.lastChild;
-    this.visible = this.space!.firstChild;
+    const space = (this.space = code.lastChild);
+    this.cursor = space?.firstChild as HTMLSpanElement;
+    this.visible = this.cursor.nextSibling;
 
     // if (options.lineNumbers) {
     //   this.lineNumbers = code.appendChild(document.createElement("div"));
@@ -854,16 +856,22 @@ export class AscendEditor {
       let edEnd = this.editing.text.length;
 
       // Continue while we have'nt hit the start and characters match
-      while (edEnd > start && end > start) {
-        const c = text.charAt(end - 1);
-
-        if (c !== this.editing.text.charAt(edEnd - 1)) {
-          break;
-        }
+      while (true) {
+        const c = this.editing.text.charAt(edEnd);
 
         // Adjust line count upon new lines
         if (c === "\n") {
           endLine--;
+        }
+
+        if (edEnd <= start || end <= start) {
+          break;
+        }
+
+        if (text.charAt(end) !== c) {
+          end++;
+          edEnd++;
+          break;
         }
 
         edEnd--;
@@ -872,7 +880,7 @@ export class AscendEditor {
 
       // Calculate final ending position
       // Find last newline in the changed region
-      newLine = text.lastIndexOf("\n", end - 1);
+      newLine = this.editing.text.lastIndexOf("\n", end - 1);
       let endCh = newLine == -1 ? end - 1 : end - newLine - 2;
 
       // Update the text content with the identified change boundaries
@@ -1036,7 +1044,7 @@ export class AscendEditor {
         ch1 = 0;
         if (this.selection.to.line == i) {
           inSel = false;
-          ch2 = this.selection.to.ch || (ch1 = null);
+          ch2 = this.selection.to.ch;
         }
       } else if (this.selection.from.line == i) {
         if (this.selection.to.line == i) {
@@ -1058,6 +1066,7 @@ export class AscendEditor {
     (this.visible as HTMLElement).innerHTML = html.join("");
     this.showingFrom = from;
     this.showingTo = to;
+
     (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
   }
 
@@ -1098,7 +1107,7 @@ export class AscendEditor {
             ch1 = 0;
             if (sto == j) {
               inSel = false;
-              ch2 = this.selection.to.ch || (ch1 = null);
+              ch2 = this.selection.to.ch;
             }
           } else if (sfrom == j) {
             if (sto == j) {
@@ -1118,24 +1127,18 @@ export class AscendEditor {
 
       this.showingFrom = from;
       this.showingTo = to;
-      (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
-    }
-  }
+      console.log(from * this.lineHeight() + "px");
 
-  findCursor() {
-    if (positionEqual(this.selection.from, this.selection.to)) {
-      return this.code.getElementsByClassName("ascend-editor-cursor")[0];
+      (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
     }
   }
 
   restartBlink() {
     clearInterval(this.blinker as number);
     let on = true;
+    this.cursor.style.display = "";
     this.blinker = setInterval(() => {
-      let cursor = this.findCursor();
-      if (cursor) {
-        (cursor as HTMLElement).style.display = (on = !on) ? "" : "none";
-      }
+      this.cursor.style.display = (on = !on) ? "" : "none";
     }, 650);
   }
 
@@ -1188,6 +1191,17 @@ export class AscendEditor {
       x: head.ch * this.charWidth(),
       y: head.line * this.lineHeight(),
     };
+  }
+
+  updateCursor() {
+    if (positionEqual(this.selection.from, this.selection.to)) {
+      this.cursor.style.top =
+        this.selection.from.line * this.lineHeight() + "px";
+      this.cursor.style.left = this.selection.from.ch * this.charWidth() + "px";
+      this.cursor.style.display = "";
+    } else {
+      this.cursor.style.display = "none";
+    }
   }
 
   /**
@@ -1274,19 +1288,27 @@ export class AscendEditor {
       oldTo = sel.to.line;
     }
 
-    if (!positionEqual(from, sel.from)) {
-      if (from.line < oldFrom) {
-        this.changes.push({
-          from: from.line,
-          to: Math.min(to.line, oldFrom) + 1,
-          diff: 0,
-        });
-      } else {
-        this.changes.push({
-          from: oldFrom,
-          to: Math.min(oldTo!, from.line) + 1,
-          diff: 0,
-        });
+    if (positionEqual(from, to)) {
+      if (!positionEqual(sel.from, sel.to)) {
+        this.changes.push({ from: oldFrom, to: oldTo! + 1, diff: 0 });
+      }
+    } else if (positionEqual(sel.from, sel.to)) {
+      this.changes.push({ from: from.line, to: to.line + 1, diff: 0 });
+    } else {
+      if (!positionEqual(from, sel.from)) {
+        if (from.line < oldFrom) {
+          this.changes.push({
+            from: from.line,
+            to: Math.min(to.line, oldFrom) + 1,
+            diff: 0,
+          });
+        } else {
+          this.changes.push({
+            from: oldFrom,
+            to: Math.min(oldTo!, from.line) + 1,
+            diff: 0,
+          });
+        }
       }
     }
 
@@ -1309,6 +1331,7 @@ export class AscendEditor {
     // Update the selection range
     sel.from = from;
     sel.to = to;
+    this.selectionChanged = true;
   }
 
   /**
@@ -1378,7 +1401,7 @@ export class AscendEditor {
     from: Position,
     to: Position,
     computeSelection: (end: Position) => { from: Position; to: Position }
-  ): Position {
+  ) {
     let newLine = code.indexOf("\n"); // Find the first newline in the replacement text.
     let nls = 0; // Counts number of newLines in the replacement text.
 
@@ -1719,15 +1742,10 @@ export class AscendEditor {
    * and end positions before and operation is performed. It also resets the linesShifted flag.
    */
   startOperation() {
-    // let ps = this.prevSelection;
-    // let sel = this.selection;
-
-    // this.prevSelection.from = sel.from;
-    // this.prevSelection.to = sel.to;
-
     this.updateInput = null;
     this.changes = [];
     this.textChanged = false;
+    this.selectionChanged = false;
   }
 
   /**
@@ -1736,22 +1754,24 @@ export class AscendEditor {
    * cursor blink. It also prepares the input if the selection spans multiple lines or if lines have been shifted.
    */
   endOperation() {
-    if (this.changes.length) {
+    if (this.selectionChanged) {
       // If the selection has changed, update the display to reflect the new selection.
-      this.scrollCursorIntoView();
-      this.updateDisplay(this.changes);
+      this.updateCursor();
       this.restartBlink();
+      this.scrollCursorIntoView();
     }
+
+    if (this.changes.length) this.updateDisplay(this.changes);
 
     // Check if the selection spans multiple lines or if lines have been shifted.
     if (
       this.updateInput === true ||
-      (this.updateInput && this.changes.length)
+      (this.updateInput !== false && this.selectionChanged)
     ) {
       this.prepareInputArea();
     }
 
-    if (this.changes.length && this.options.onCursorActivity) {
+    if (this.selectionChanged && this.options.onCursorActivity) {
       this.options.onCursorActivity(AscendEditor);
     }
     if (this.textChanged && this.options.onChange) {

@@ -44,12 +44,14 @@ body {
 }
 
 .ascend-editor-cursor {
-  width: 1.5px;
+  /* width: 1.5px;
   height: 1.2em;
   background: black;
-  margin-top: -0.1em;
+  margin-top: -0.1em; */
   position: absolute;
   display: none;
+  z-index: 10;
+  border-left: 2px solid black;
 }
 .font-bold-style {
   font-family: "Quicksand-Bold";

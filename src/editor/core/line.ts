@@ -112,7 +112,7 @@ export class Line {
     function addPiece(text: string, style: string | null): void {
       let cls = style;
 
-      const len = text.length; // Length of the text segment
+      const len = text?.length; // Length of the text segment
       let cut: number | undefined; // Position to cut the text segment if selection cuts through it.
 
       // If currently inside selection
@@ -125,7 +125,7 @@ export class Line {
           // If from equals to, then set cursor position.
           if (sfrom === sto) {
             sel = 2;
-            html.push('<span class="ascend-editor-cursor">\u200b</span>');
+            // html.push('<span class="ascend-editor-cursor">\u200b</span>');
           } else {
             // Otherwise the selection starts at the span.
             sel = 1;
@@ -183,10 +183,6 @@ export class Line {
 
     const empty = html.length == 0;
 
-    // Handle the case of empty selection at the end.
-    if (!empty && pos == sfrom && sfrom == sto) {
-      html.push('<span class="ascend-editor-cursor">\u200b</span>');
-    }
     // Handle the case of an open-ended selection.
     if (sel === 1 && sto == null) {
       html.push('<span class="ascend-editor-selected"> </span>');

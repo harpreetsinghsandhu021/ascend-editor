@@ -117,7 +117,7 @@ export function copyStyles(
   let state = 0; // State machine: 0 = before 'from', 1 = within 'from' to 'to'
   for (let i = 0; pos < to; i += 2) {
     const part = source[i] as string;
-    const end = pos + part.length;
+    const end = pos + part?.length;
 
     if (state === 0) {
       // Before the 'from' position
