@@ -86,6 +86,7 @@ export class AscendEditor {
     workDelay: 300,
     undoDepth: 40,
     readOnly: false,
+    tabIndex: null,
   };
   options: { [key: string]: any } = {};
 
@@ -111,7 +112,7 @@ export class AscendEditor {
 
     div.innerHTML =
       '<textarea style="position: absolute; width: 10000px; left: -100000px; top: -100000px;"></textarea>\
-<div class="ascend-editor-code"><span style="position: absolute; visibility: hidden">-</span>\
+<div class="ascend-editor-code"><div style="position: absolute; visibility: hidden"><span>-</span></div>\
 <div style="position: relative"><span class="ascend-editor-cursor"> </span><div style="position: absolute; left: 0;"></div></div></div>';
     const textarea = (this.input = div.querySelector(
       "textarea"
@@ -121,6 +122,10 @@ export class AscendEditor {
     const space = (this.space = code.lastChild);
     this.cursor = space?.firstChild as HTMLSpanElement;
     this.visible = this.cursor.nextSibling;
+
+    if (options.tabIndex != null) {
+      this.input.tabIndex = options.tabIndex;
+    }
 
     // if (options.lineNumbers) {
     //   this.lineNumbers = code.appendChild(document.createElement("div"));
@@ -378,7 +383,7 @@ export class AscendEditor {
   updateLines(
     from: Position,
     to: Position,
-    newText: string[],
+    newText: string[] | string,
     selFrom: Position,
     selTo: Position
   ) {
@@ -1151,9 +1156,11 @@ export class AscendEditor {
       return null;
     }
 
+    let line = Math.floor(y / this.lineHeight());
+
     return this.clipPosition({
-      line: Math.floor(y / this.lineHeight()),
-      ch: Math.round(x / this.charWidth()),
+      line: line,
+      ch: this.charFromX(line, x),
     });
   }
 
@@ -1188,7 +1195,7 @@ export class AscendEditor {
   localCursorCoords(start: boolean) {
     let head = start ? this.selection.from : this.selection.to;
     return {
-      x: head.ch * this.charWidth(),
+      x: this.charX(head.line, head.ch),
       y: head.line * this.lineHeight(),
     };
   }
@@ -1197,10 +1204,80 @@ export class AscendEditor {
     if (positionEqual(this.selection.from, this.selection.to)) {
       this.cursor.style.top =
         this.selection.from.line * this.lineHeight() + "px";
-      this.cursor.style.left = this.selection.from.ch * this.charWidth() + "px";
+      this.cursor.style.left =
+        this.charX(this.selection.from.line, this.selection.from.ch) + "px";
       this.cursor.style.display = "";
     } else {
       this.cursor.style.display = "none";
+    }
+  }
+
+  /**
+   * Calculates the horizontal pixel position for a given character position in a line.
+   * @param line - The line number in the editor.
+   * @param pos - The character position within the line.
+   */
+  charX(line: number, pos: number) {
+    let text = this.lines[line].text;
+
+    // If no tabs in text before pos, multiply by char width.
+    if (text?.lastIndexOf("\t", pos) == -1) {
+      return pos * this.charWidth();
+    }
+
+    // Text contains tabs, need to measure precisely
+    try {
+      // Set the measurement span's content to text up to pos
+      this.measure.firstChild!.firstChild!.nodeValue = text?.slice(
+        0,
+        pos
+      ) as string;
+
+      // Return actual width of text segment
+      return (this.measure.firstChild as HTMLElement).offsetWidth;
+    } finally {
+      // Always restore measurement span to default state
+      this.measure.firstChild!.firstChild!.nodeValue = "-";
+    }
+  }
+
+  /**
+   * Converts a horizontal pixel position to a character position within a line.
+   * @param line - The line number in the editor.
+   * @param x - The horizontal pixel position.
+   */
+  charFromX(line: number, x: number) {
+    let text = this.lines[line].text;
+    let cw = this.charWidth();
+
+    // If no tabs, divide x by char width
+    if (text?.indexOf("\t") == -1) {
+      return Math.min(text.length, Math.round(x / cw));
+    }
+
+    let mspan = this.measure.firstChild;
+    let mtext = mspan?.firstChild;
+
+    try {
+      let from = 0;
+      let to = text?.length!;
+
+      // Binary search to find character position
+      while (true) {
+        // If search range is 1 or less, we found our position
+        if (to - from <= 1) return from;
+
+        let middle = Math.ceil((from + to) / 2);
+        mtext!.nodeValue = text?.slice(0, middle) as string;
+
+        if ((mspan as HTMLElement).offsetWidth > x) {
+          to = middle;
+        } else {
+          from = middle;
+        }
+      }
+    } finally {
+      mtext!.nodeValue = "-";
     }
   }
 
@@ -1916,7 +1993,7 @@ export class AscendEditor {
   }
 
   charWidth() {
-    return this.measure.offsetWidth || 1;
+    return (this.measure.firstChild as HTMLElement)!.offsetWidth || 1;
   }
 
   scrollEnd(top: boolean) {
