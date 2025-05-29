@@ -779,14 +779,15 @@ export class AscendEditor {
     if (changed) {
       this.shiftSelecting = null;
 
-      this.replaceLines(ed.from, ed.to, text.split(/\r?\n/g));
+      this.replaceLines(ed.from, ed.to, text.split(/\r?\n/g), from, to);
+    } else {
+      // Update the selection based on new start and end positions.
+      this.setSelection(from, to);
     }
 
     ed.text = text;
     ed.start = selStart;
     ed.end = selEnd;
-    // Update the selection based on new start and end positions.
-    this.setSelection(from, to);
 
     return changed ? "changed" : moved ? "moved" : false;
   }
@@ -1118,7 +1119,7 @@ export class AscendEditor {
    * Sets the text selection range in the editor.
    *
    */
-  setSelection(from: Position, to: Position, oldFrom: number, oldTo: number) {
+  setSelection(from: Position, to: Position, oldFrom?: number, oldTo?: number) {
     // Get the current selection object and the shift selecting state.
     let sel = this.selection;
     let sh = this.shiftSelecting;
@@ -1165,22 +1166,22 @@ export class AscendEditor {
       } else {
         this.changes.push({
           from: oldFrom,
-          to: Math.min(oldTo, from.line) + 1,
+          to: Math.min(oldTo!, from.line) + 1,
           diff: 0,
         });
       }
     }
 
     if (!positionEqual(to, sel.to)) {
-      if (to.line < oldTo) {
+      if (to.line < oldTo!) {
         this.changes.push({
           from: Math.max(oldFrom, from.line),
-          to: oldTo + 1,
+          to: oldTo! + 1,
           diff: 0,
         });
       } else {
         this.changes.push({
-          from: Math.max(from.line, oldTo),
+          from: Math.max(from.line, oldTo!),
           to: to.line + 1,
           diff: 0,
         });
@@ -1588,14 +1589,14 @@ export class AscendEditor {
    * and end positions before and operation is performed. It also resets the linesShifted flag.
    */
   startOperation() {
-    let ps = this.prevSelection;
-    let sel = this.selection;
+    // let ps = this.prevSelection;
+    // let sel = this.selection;
 
-    this.prevSelection.from = sel.from;
-    this.prevSelection.to = sel.to;
+    // this.prevSelection.from = sel.from;
+    // this.prevSelection.to = sel.to;
 
     this.updateInput = false;
-    this.textChanged = false;
+    this.changes = [];
   }
 
   /**
