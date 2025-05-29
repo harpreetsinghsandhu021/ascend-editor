@@ -1202,15 +1202,7 @@ export class AscendEditor {
     // Ensure positions are within valid bounds
     from = this.clipPosition(from);
     to = to ? this.clipPosition(to) : from;
-
-    // Perform the actual text replacement and get the end position.
-    const end = this.replaceRange1(code, from, to);
-
-    // Adjust the selection range based on the replacement.
-    this.setSelection(
-      adjustPos(this.selection.from),
-      adjustPos(this.selection.to)
-    );
+    let end1: Position = { line: 0, ch: 0 };
 
     /**
      * Adjusts a position based on the text replacement.
@@ -1223,22 +1215,36 @@ export class AscendEditor {
     function adjustPos(pos: Position): Position {
       if (positionLess(pos, from)) return pos;
 
-      if (positionLess(pos, to!)) return end;
+      if (positionLess(pos, to!)) return end1;
 
       // Position is on the same line as replacement end
       if (pos.line == to?.line) {
         return {
-          line: end.line,
-          ch: pos.ch + end.ch - to.ch,
+          line: end1.line,
+          ch: pos.ch + end1.ch - to.ch,
         };
       }
-
       // Position is after replacement - adjusts line number
       return {
-        line: pos.line + end.line - to!.line,
+        line: pos.line + end1.line - to!.line,
         ch: pos.ch,
       };
     }
+
+    this.replaceRange1(
+      code,
+      from,
+      to,
+      (end: Position): { from: Position; to: Position } => {
+        end1 = end;
+        return {
+          from: adjustPos(this.selection.from),
+          to: adjustPos(this.selection.to),
+        };
+      }
+    );
+
+    return end1;
   }
 
   /**
@@ -1248,7 +1254,12 @@ export class AscendEditor {
    * @param from - Starting position of replacement
    * @param to - Position object indicating the end of the inserted text
    */
-  replaceRange1(code: string, from: Position, to: Position): Position {
+  replaceRange1(
+    code: string,
+    from: Position,
+    to: Position,
+    computeSelection: (end: Position) => { from: Position; to: Position }
+  ): Position {
     // Split replacement text into lines
     let splittedText = code.split(/\r?\n/g);
 
@@ -1267,8 +1278,16 @@ export class AscendEditor {
     // Calculate the change in number of lines
     const diff = splittedText.length - (to.line - from.line + 1);
 
+    const newSelection = computeSelection({ line: to.line + diff, ch: endCh });
+
     // Update the affected lines
-    this.updateLines(from.line, to.line + 1, splittedText);
+    this.updateLines(
+      from.line,
+      to.line + 1,
+      splittedText,
+      newSelection.from,
+      newSelection.to
+    );
 
     return { line: to.line + diff, ch: endCh };
   }
@@ -1280,20 +1299,21 @@ export class AscendEditor {
    */
   replaceSelection(code: string, collapse?: "start" | "end") {
     // Replace the selected text
-    const end = this.replaceRange1(
+    this.replaceRange1(
       code,
       this.selection.from,
-      this.selection.to
+      this.selection.to,
+      (end: Position) => {
+        // Handle selection collapse based on the collapse parameter
+        if (collapse == "end") {
+          return { from: end, to: end };
+        } else if (collapse == "start") {
+          return { from: this.selection.from, to: this.selection.from };
+        } else {
+          return { from: this.selection.from, to: end };
+        }
+      }
     );
-
-    // Handle selection collapse based on the collapse parameter
-    if (collapse == "end") {
-      this.setSelection(end, end);
-    } else if (collapse == "start") {
-      this.setSelection(this.selection.from, this.selection.from);
-    } else {
-      this.selection.from, end;
-    }
   }
 
   /**
@@ -1387,20 +1407,6 @@ export class AscendEditor {
     let diff = indentation - currSpace;
     if (!diff) return;
 
-    // If the difference is positive, it means the line needs more indentation
-    if (diff > 0) {
-      // Construct a string of spaces with the length of the difference
-      let space = "";
-      for (let i = 0; i < diff; i++) space = space + " ";
-      // Insert the spaces at the beginning of the lines
-      this.replaceLines(n, n + 1, [space + text]);
-    } else {
-      // If the difference is negative, it means the line has too much indentation.
-
-      // Remove the extra spaces from the beginning of the line.
-      this.replaceLines(n, n + 1, [text.slice(-diff)]);
-    }
-
     // Create copies of the from and to positions of the selection
     let from = copyPosition(this.selection.from);
     let to = copyPosition(this.selection.to);
@@ -1410,8 +1416,19 @@ export class AscendEditor {
     // If the to.line is the current line, it updates the to.ch to be at least the new indentation.
     if (to.line == n) to.ch = Math.max(indentation, to.ch + diff);
 
-    // Sets the selection with the new from and to positions.
-    this.setSelection(from, to);
+    // If the difference is positive, it means the line needs more indentation
+    if (diff > 0) {
+      // Construct a string of spaces with the length of the difference
+      let space = "";
+      for (let i = 0; i < diff; i++) space = space + " ";
+      // Insert the spaces at the beginning of the lines
+      this.replaceLines(n, n + 1, [space + text], from, to);
+    } else {
+      // If the difference is negative, it means the line has too much indentation.
+
+      // Remove the extra spaces from the beginning of the line.
+      this.replaceLines(n, n + 1, [text.slice(-diff)], from, to);
+    }
   }
 
   /**
