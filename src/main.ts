@@ -139,8 +139,11 @@ export class AscendEditor {
     this.selection = { from: zero, to: zero, inverted: false };
     this.prevSelection = { from: zero, to: zero };
 
-    this.setValue(options.value || "");
-    this.restartBlink();
+    this.operation(() => {
+      this.setValue(options.value || "");
+      this.updateInput = false;
+    })();
+
     this.prepareInputArea();
 
     const self = this;
@@ -150,6 +153,7 @@ export class AscendEditor {
       e.stop();
     });
 
+    connect(code, "scroll", () => this.updateDisplay(false));
     connect(code, "dblclick", this.operation(this.onDblClick));
 
     connect(code, "dragover", function (e) {
@@ -194,7 +198,6 @@ export class AscendEditor {
     this.history = null;
     let top = { line: 0, ch: 0 };
     this.replaceLines(0, this.lines.length, code.split(/\r?\n/g), top, top);
-    this.setCursor(0);
     this.history = new History();
   }
 
@@ -222,7 +225,7 @@ export class AscendEditor {
     if (!start) return;
 
     // Set the cursor position and turn off double scroll/paste selection
-    this.setCursor(start.line, start.ch, false);
+    this.setCursor(start.line, start.ch);
 
     // If the button pressed is not the left mouse button, return
     if (e.button() != 1) return;
@@ -289,7 +292,7 @@ export class AscendEditor {
   onDblClick(e: AsEvent) {
     let pos = this.posFromMouse(e);
     if (!pos) return;
-    this.selectWordAt(posFromMouse);
+    // this.selectWordAt(this.posFromMouse(e));
     e.stop();
   }
 
@@ -353,6 +356,7 @@ export class AscendEditor {
       for (let i = from; i < to; i++) {
         old.push(lines[i].text!);
       }
+
       // Record the change in history
       this.history.addChange(from, newText.length, old);
       // Maintain history size limit by removing oldest changes
@@ -360,6 +364,7 @@ export class AscendEditor {
         this.history.done.shift();
       }
     }
+
     // Update the lines with new content.
     this.updateLines(from, to, newText, selFrom, selTo);
   }
@@ -396,7 +401,7 @@ export class AscendEditor {
     }
 
     // Update the text and tokens of each line in the given range
-    for (let i = 0, l = newText.length; i < l; i++) {
+    for (let i = Math.max(0, lenDiff), l = newText.length; i < l; i++) {
       lines[from + i].setText(newText[i]);
     }
 
@@ -422,6 +427,7 @@ export class AscendEditor {
 
     this.showingFrom = updateLine(this.showingFrom);
     this.showingTo = updateLine(this.showingTo);
+
     this.setSelection(
       selFrom,
       selTo,
@@ -437,27 +443,7 @@ export class AscendEditor {
    *
    * @param on - A boolean value indicating the desired state of line numbers.
    */
-  setLineNumbers(on: boolean) {
-    // Check if the curent state of line numbers is different from the desired state.
-    // This prevents unecessary DOM manipulations and function calls if the line numbers are
-    // already in the requested state.
-    if (!this.options.lineNumbers != !on) {
-      this.options.lineNumbers = on;
-    }
-
-    if (on) {
-      const newLineNumbersElement = document.createElement("div");
-      newLineNumbersElement.className = "ascend-editor-line-numbers";
-      this.code.insertBefore(newLineNumbersElement, this.code.firstChild);
-      this.updateLineNumbers();
-    } else {
-      if (this.lineNumbers) {
-        this.code.removeChild(this.lineNumbers);
-      }
-
-      this.lineNumbers = undefined;
-    }
-  }
+  setLineNumbers(on: boolean) {}
 
   /**
    * Helper function for implementing undo/redo in the editor. Handles the process of
@@ -529,7 +515,7 @@ export class AscendEditor {
 
     if (!text || this.options.readOnly) return;
 
-    const pos = this.clipPosition(this.mouseEventPos(e)!);
+    const pos = this.clipPosition(this.posFromMouse(e)!);
     this.setSelection(pos, pos);
 
     this.replaceSelection(text);
@@ -732,9 +718,6 @@ export class AscendEditor {
       }
     }
 
-    // Split text into lines for position calculations.
-    let lines = text.split("\n");
-
     // Computes the line and character position from an offset.
     function computeOffset(n: number, startLine: number) {
       let pos = 0; // Current position in the flat text
@@ -793,9 +776,9 @@ export class AscendEditor {
   }
 
   scrollCursorIntoView() {
-    let cursor = this.localCursorCoords(this.selection.inverted);
-    cursor.x += this.space.offsetLeft;
-    cursor.y += this.space.offsetTop;
+    let cursor = this.localCursorCoords(this.selection.inverted!);
+    cursor.x += (this.space as HTMLElement).offsetLeft;
+    cursor.y += (this.space as HTMLElement).offsetTop;
 
     let screen = this.code.clientHeight;
     let screenTop = this.code.scrollTop;
@@ -865,18 +848,17 @@ export class AscendEditor {
     }
 
     let from = Math.min(this.showingFrom, Math.max(visibleFrom - 2, 0));
-    let to = Math.max(
-      this.showingTo,
-      Math.min(visibleTo + 2, this.lines.length)
+    let to = Math.floor(
+      Math.max(this.showingTo, Math.min(visibleTo + 2, this.lines.length))
     );
 
     let updates = [];
     let pos = from;
-    let at = from - showingFrom;
+    let at = from - this.showingFrom;
     let changedLines = 0;
 
     if (at > 0) {
-      this.updates.push({ from: pos, to: pos, size: at, at: 0 });
+      updates.push({ from: pos, to: pos, size: at, at: 0 });
     }
 
     for (let i = 0; i < intact.length; i++) {
@@ -885,8 +867,13 @@ export class AscendEditor {
       if (range.from >= to) break;
       if (range.from > pos) {
         let size = range.at - at;
-        this.updates.push({ from: pos, to: range.from, size: size, at: at });
-        changeLines += size;
+        updates.push({
+          from: pos,
+          to: range.from,
+          size: size,
+          at: at,
+        });
+        changedLines += Math.floor(size);
       }
 
       pos = range.to;
@@ -895,15 +882,15 @@ export class AscendEditor {
 
     if (pos < to) {
       let size = Math.max(0, this.showingTo - this.showingFrom);
-      changedLines += size;
-      this.updates.push({ from: pos, to: to, size: size, at: at });
+      changedLines += Math.floor(size);
+      updates.push({ from: pos, to: to, size: size, at: at });
     }
 
     if (!updates.length) return;
     if (changedLines > (visibleTo - visibleFrom) * 0.3) {
       this.refreshDisplay(visibleFrom, visibleTo);
     } else {
-      this.patchDisplay(this.updates, from, to);
+      this.patchDisplay(updates, from, to);
     }
   }
 
@@ -926,24 +913,23 @@ export class AscendEditor {
         if (this.selection.to.line == i) {
           inSel = false;
           ch2 = this.selection.to.ch || null;
-        } else if (this.selection.from.line == i) {
-          if (this.selection.to.line == i) {
-            ch1 = this.selection.from.ch;
-            ch2 = this.selection.to.ch;
-          } else {
-            inSel = true;
-            ch1 = this.selection.from.ch;
-          }
         }
-
-        html.push("<div>", this.lines[i].getHTML(ch1, ch2!), "</div>");
+      } else if (this.selection.from.line == i) {
+        if (this.selection.to.line == i) {
+          ch1 = this.selection.from.ch;
+          ch2 = this.selection.to.ch;
+        } else {
+          inSel = true;
+          ch1 = this.selection.from.ch;
+        }
       }
-
-      (this.visible as HTMLElement).innerHTML = html.join("");
-      this.showingFrom = from;
-      this.showingTo = to;
-      (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
+      html.push("<div>", this.lines[i].getHTML(ch1!, ch2!), "</div>");
     }
+
+    (this.visible as HTMLElement).innerHTML = html.join("");
+    this.showingFrom = from;
+    this.showingTo = to;
+    (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
   }
 
   patchDisplay(
@@ -955,8 +941,8 @@ export class AscendEditor {
     let sto = this.selection.to.line;
     let off = 0;
 
-    for (let i = 0; i < this.updates.length; i++) {
-      let rec = this.updates[i];
+    for (let i = 0; i < updates.length; i++) {
+      let rec = updates[i];
 
       let extra = rec.to - rec.from - rec.size;
 
@@ -967,13 +953,10 @@ export class AscendEditor {
           this.visible?.removeChild(
             nodeAfter ? nodeAfter.previousSibling! : this.visible.lastChild!
           );
+        }
 
-          for (let j = Math.max(0, extra); j > 0; j--) {
-            this.visible?.insertBefore(
-              document.createElement("div"),
-              nodeAfter!
-            );
-          }
+        for (let j = Math.max(0, extra); j > 0; j--) {
+          this.visible?.insertBefore(document.createElement("div"), nodeAfter!);
         }
 
         let node = this.visible?.childNodes[rec.at + off];
@@ -1032,7 +1015,7 @@ export class AscendEditor {
     let x = (e.e as MouseEvent).pageX - off.left;
     let y = (e.e as MouseEvent).pageY - off.top;
 
-    if (e.target() == code && y < this.lines.length * this.lineHeight()) {
+    if (e.target() == this.code && y < this.lines.length * this.lineHeight()) {
       return null;
     }
 
@@ -1064,7 +1047,7 @@ export class AscendEditor {
    * @param ch - The cursor position within the line where the cursor should be set
    * @param rest
    */
-  setCursor(line: number, ch?: number, rest?: boolean) {
+  setCursor(line: number, ch?: number) {
     let pos = this.clipPosition({ line: line, ch: ch || 0 });
 
     this.setSelection(pos, pos);
@@ -1120,6 +1103,12 @@ export class AscendEditor {
    *
    */
   setSelection(from: Position, to: Position, oldFrom?: number, oldTo?: number) {
+    if (
+      positionEqual(this.selection.from, from) &&
+      positionEqual(this.selection.to, to)
+    )
+      return;
+
     // Get the current selection object and the shift selecting state.
     let sel = this.selection;
     let sh = this.shiftSelecting;
@@ -1605,9 +1594,6 @@ export class AscendEditor {
    * cursor blink. It also prepares the input if the selection spans multiple lines or if lines have been shifted.
    */
   endOperation() {
-    let ps = this.prevSelection;
-    let sel = this.selection;
-
     if (this.changes.length) {
       // If the selection has changed, update the display to reflect the new selection.
       this.updateDisplay();
