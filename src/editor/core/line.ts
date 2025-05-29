@@ -1,7 +1,7 @@
 import { StringStream } from "../../parsers/stringStream";
 import { textSpan } from "../../utils/dom";
-import { htmlEscape } from "../../utils/helpers";
-import type {Position} from "../../interfaces";
+import { copyStyles, htmlEscape } from "../../utils/helpers";
+import type { Position } from "../../interfaces";
 
 /**
  * Represents a single line of code within the editor. Manages the display, selection and highlighting of text
@@ -11,8 +11,6 @@ import type {Position} from "../../interfaces";
  * @param {HTMLElement} parent - The parent object.
  */
 export class Line {
-  // Stores the HTML div element representing the line.
-  public div: HTMLElement;
   // Stores Parent object.
   public parent: any;
   // Stores the text content of the line.
@@ -26,62 +24,43 @@ export class Line {
   // Stores the styles of the line.
   public styles: (string | null)[];
 
-  constructor(text: string) {
+  constructor(text: string, styles?: (string | null)[]) {
     this.text = text;
-    this.stateAfter = null
-    this.styles = [text, null];
+    this.stateAfter = null;
+    this.styles = styles || [text, null];
   }
 
   /**
-   * Sets the text content of the line. This method also resets the state after and clears
-   * the existing content of the line's div.
+   * Replaces a portion of the line's text and styles with new text.
    *
-   * @param text - The new content for the line.
+   * This function modifies the line by replacing the text b/w the 'from' and 'to' indices with the provided 'text'.
+   * It also updates the styles array to reflect the changes in the text. The function ensures that the styles are
+   * correctly aligned with the new text content.
+   *
+   * @param from - The starting index of the text to be replaced.
+   * @param to - The ending index of the text to be replaced.
+   * @param text - The new text to insert in place of the old text.
    */
-  setText(text: string): void {
-    this.text = text;
-    let st = this.styles;
+  replace(from: number, to: number, text: string) {
+    let st: (string | null)[] = [];
+    copyStyles(0, from, this.styles, st);
+    if (text) st.push(text, null);
 
-    // Preserve styling for unchanged parts of the line. This section attempts to keep the existing style spans
-    // if the beginning and end of the line have not changed.
-    if (text && st.length > 2) {
-      let from = 0;
-      let to = text.length;
-      let sfrom = 0;
-      let sto = st.length - 2;
-
-      // Compare the beginning of the new text with the existing styles.
-      // Iterate as long as the text matches and there are more styles to compare.
-      while (
-        from < to &&
-        sfrom < sto &&
-        text.indexOf(st[sfrom]!, from) == from
-      ) {
-        // Increment from and sfrom and get the next comparison string.
-        from += st[sfrom]!.length;
-        sfrom += 2;
-      }
-
-      // Compare the end of the new text with the exisitn styles
-      while (
-        to > from &&
-        sto > sfrom &&
-        text.lastIndexOf(st[sto]!, to) === to - st[sto]!.length
-      ) {
-        // Decrement to and sto and get the next comparison string.
-        to -= st[sto]!.length;
-        sto -= 2;
-      }
-
-      // Replace the middle section of the styles array with the new text and a null style.
-      st.splice(sfrom, sto + 2 - sfrom, text.slice(from, to), null);
-    } else if (text) {
-      this.styles.splice(0, this.styles.length, text, null);
-    } else {
-      st.length = 0;
-    }
-
+    this.styles = st;
+    this.text = this.text?.slice(0, from) + text + this.text?.slice(to);
     this.stateAfter = null;
+  }
+
+  /**
+   * Splits the line into two lines at the given position
+   * @param pos - The index at which to split the line
+   * @param textBefore - The text to prepend the text before the split position.
+   * @returns A new 'Line' object representing the portion of the line after the split.
+   */
+  split(pos: number, textBefore: string) {
+    let st = [textBefore, null];
+    copyStyles(pos, this.text?.length!, this.styles, st);
+    return new Line(textBefore + this.text?.slice(pos), st);
   }
 
   /**
@@ -110,8 +89,7 @@ export class Line {
         st[st.length - 2] += substr;
       } else if (substr) {
         // If the styles are different, push the substring and style to the styles array.
-        this.styles.push(substr);
-        this.styles.push(style);
+        this.styles.push(substr, style);
       }
     }
   }
@@ -119,7 +97,7 @@ export class Line {
   /**
    * Updates the DOM to reflect the current text content, styles, and selection.
    */
-  getHTML(sfrom:number, sto:number) {
+  getHTML(sfrom: number, sto: number) {
     const html: string[] = [];
     const st = this.styles;
     let pos = 0;
@@ -132,6 +110,8 @@ export class Line {
      * @param style
      */
     function addPiece(text: string, style: string | null): void {
+      let cls = style;
+
       const len = text.length; // Length of the text segment
       let cut: number | undefined; // Position to cut the text segment if selection cuts through it.
 
@@ -152,7 +132,7 @@ export class Line {
           }
         }
         // If the offset is within the current span, split the selection at the selection part.
-        else if (off < len) {
+        else if (off <= len && off < len) {
           cut = off;
         }
       }
@@ -171,7 +151,7 @@ export class Line {
         }
       }
 
-      let cls = style; // Build the class string.
+      // Build the class string.
       if (sel === 1) {
         cls += " ascend-editor-selected"; // Add selection class.
       }
@@ -179,9 +159,9 @@ export class Line {
       // Open the span tag, add the class, text and close the span.
       html.push(
         "<span",
-          (cls ? ' class="' + cls + '">' : ">"),
-          htmlEscape(cut === null ? text : text.slice(0, cut)),
-          "</span>"
+        cls ? ' class="' + cls + '">' : ">",
+        htmlEscape(cut === null ? text : text.slice(0, cut)),
+        "</span>"
       );
 
       node++;
@@ -215,6 +195,6 @@ export class Line {
     }
 
     // Set the inner HTML of the div with the generated HTML.
-   return html.join("");
+    return html.join("");
   }
 }

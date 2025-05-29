@@ -18,7 +18,7 @@ export interface Line {
 export interface Change {
   start: number;
   added: number;
-  old: string[];
+  old: string;
 }
 
 export interface SearchPosition {

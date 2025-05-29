@@ -24,10 +24,10 @@ export function eltOffset(node: HTMLElement): Offset {
     node = node.offsetParent as HTMLElement;
   }
 
-  while(node && node != document.body) {
-    x -= (node as HTMLElement).scrollLeft
-    y -= (node as HTMLElement).scrollTop
-    node = node.parentNode as HTMLElement
+  while (node && node != document.body) {
+    x -= (node as HTMLElement).scrollLeft;
+    y -= (node as HTMLElement).scrollTop;
+    node = node.parentNode as HTMLElement;
   }
 
   return { left: x, top: y };
@@ -79,7 +79,7 @@ export function lineElt(line: Line) {
  */
 export function editEnd(from: string, to: string): number {
   // nothing to compare
-  if (!to) return 0;
+  if (!to) return from ? from.length : 0;
 
   // Return the full length of "to" as everything in "to" is considered new.
   if (!from) return to.length;
@@ -93,4 +93,56 @@ export function editEnd(from: string, to: string): number {
 
   // Return the position from the end where differences start (1-based)
   return j + 1;
+}
+
+/**
+ * Copies styles from a source range to a destination range, applying styles from a source array.
+ *
+ * This functions iterates through styled text parts in the source array, copying the styles that fall
+ * within the specified from and to positions to the dest array. It manages a state to determine whether
+ * the current part is before, within or after the specified range.
+ *
+ * @param from - The starting position of the range to copy styles from (inclusive)
+ * @param to - The ending position of the range to copy styles to (exclusive)
+ * @param source - An array containing styled parts and their corresponding styles. The array is expected to be alternate b/w text and style.
+ * @param dest - The destination array where the styled text parts and styles within the specified range will be copied.
+ */
+export function copyStyles(
+  from: number,
+  to: number,
+  source: (string | null)[],
+  dest: (string | null)[]
+) {
+  let pos = 0; // Current character position in the source text
+  let state = 0; // State machine: 0 = before 'from', 1 = within 'from' to 'to'
+  for (let i = 0; pos < to; i += 2) {
+    const part = source[i] as string;
+    const end = pos + part.length;
+
+    if (state === 0) {
+      // Before the 'from' position
+      if (end > from) {
+        // The current fragment overlaps with the 'from' position
+        dest.push(
+          part.slice(from - pos, Math.min(part.length, to - pos)), // Copy the relevant portion of the text
+          source[i + 1] // Copy the corresponding style
+        );
+      }
+
+      if (end >= from) {
+        // We've reached or passed the 'from' position
+        state = 1; // Transition to the 'within range' state
+      }
+    } else if (state === 1) {
+      // Within the 'from' to 'to' range
+      if (end > to) {
+        // The current fragment extends beyond the 'to' position
+        dest.push(part.slice(0, to - pos), source[i + 1]);
+      } else {
+        // The current fragment is entirely within the 'from' and 'to' range
+        dest.push(part, source[i + 1]);
+      }
+    }
+    pos = end; // Update the current character position
+  }
 }
