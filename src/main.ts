@@ -1115,34 +1115,34 @@ export class AscendEditor {
         for (let j = Math.max(0, extra); j > 0; j--) {
           this.visible?.insertBefore(document.createElement("div"), nodeAfter!);
         }
-
-        let node = this.visible?.childNodes[rec.at + off];
-        let inSel = sfrom < rec.from && sto >= rec.from;
-
-        for (let j = rec.from; j < rec.to; j++) {
-          let ch1 = null;
-          let ch2 = null;
-          if (inSel) {
-            ch1 = 0;
-            if (sto == j) {
-              inSel = false;
-              ch2 = this.selection.to.ch;
-            }
-          } else if (sfrom == j) {
-            if (sto == j) {
-              ch1 = this.selection.from.ch;
-              ch2 = this.selection.to.ch;
-            } else {
-              inSel = true;
-              ch1 = this.selection.from.ch;
-            }
-          }
-
-          (node as HTMLElement).innerHTML = this.lines[j].getHTML(ch1!, ch2!);
-          node = node?.nextSibling!;
-        }
-        off += extra;
       }
+
+      let node = this.visible?.childNodes[rec.at + off];
+      let inSel = sfrom < rec.from && sto >= rec.from;
+
+      for (let j = rec.from; j < rec.to; j++) {
+        let ch1 = null;
+        let ch2 = null;
+        if (inSel) {
+          ch1 = 0;
+          if (sto == j) {
+            inSel = false;
+            ch2 = this.selection.to.ch;
+          }
+        } else if (sfrom == j) {
+          if (sto == j) {
+            ch1 = this.selection.from.ch;
+            ch2 = this.selection.to.ch;
+          } else {
+            inSel = true;
+            ch1 = this.selection.from.ch;
+          }
+        }
+
+        (node as HTMLElement).innerHTML = this.lines[j].getHTML(ch1!, ch2!);
+        node = node?.nextSibling!;
+      }
+      off += extra;
 
       this.showingFrom = from;
       this.showingTo = to;
