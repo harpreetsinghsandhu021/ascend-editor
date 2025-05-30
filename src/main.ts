@@ -331,6 +331,7 @@ export class AscendEditor {
       { line: pos.line, ch: end }
     );
   }
+
   /**
    * UpdateLines
    * Updates a range of lines in the editor with new text content.
@@ -921,56 +922,110 @@ export class AscendEditor {
     return changed ? "changed" : moved ? "moved" : false;
   }
 
+  /**
+   * Ensures the cursor is visible in the editor viewporr if necessary.
+   *
+   * This method adjusts both vertical and horizontal scroll positions to make the cursor visible,
+   * maintaining a small padding around the cursor for better visibility.
+   *
+   * This method performs the following steps:
+   * 1. Gets cursor coordinates relative to the editor space
+   * 2. Adjusts vertical scroll if cursor is above or below viewport
+   * 3. Adjusts horizontal scroll if cursor is left or right of viewport
+   */
   scrollCursorIntoView() {
+    // Get cursor coordinates relative to the editor space
     let cursor = this.localCursorCoords(this.selection.inverted!);
+    // Adjust coordinates to account for the editor's position in the document
     cursor.x += (this.space as HTMLElement).offsetLeft;
     cursor.y += (this.space as HTMLElement).offsetTop;
 
+    // Get current viewport height and scroll position
     let screen = this.code.clientHeight;
     let screenTop = this.code.scrollTop;
 
+    // Vertical scrolling adjustment
     if (cursor.y < screenTop) {
+      // If cursor is above viewport, scroll up
+      // Add 10px padding above cursor for better visibility
       this.code.scrollTop = Math.max(0, cursor.y - 10);
     } else if ((cursor.y += this.lineHeight()) > screenTop + screen) {
+      // If cursor is below viewport, scroll down
+      // Add 10px padding below cursor for better visibility
       this.code.scrollTop = cursor.y + 10 - screen;
     }
 
+    // Get current viewport width and horizontal scroll position
     let screenWidth = (this.space as HTMLElement).offsetWidth;
     let screenLeft = this.code.scrollLeft;
+
+    // Horizontal scrolling adjustment
     if (cursor.x < screenLeft) {
+      // If cursor is left of viewport, scroll left
+      // Add 10px
       this.code.scrollLeft = Math.max(0, cursor.x - 10);
     } else if (cursor.x > screenWidth + screenLeft) {
+      // If cursor is right of viewport, scroll right
       this.code.scrollLeft = cursor.x + 10 - screenWidth;
     }
   }
 
+  /**
+   * Updates the editor's display to reflect changes in the document content and viewport position.
+   * This method is responsible for efficiently updating only the necessary parts of the display by tracking
+   * changes and maintaining a list of intact (unchanged) regions.
+   *
+   * The method performs these key steps:
+   * 1. Calculates visible line range based on scroll position
+   * 2. Tracks intact (unchanged) regions of text
+   * 3. Processes changes to determine which display regions need updating
+   * 4. Either patches specific regions or refreshes entire display based on change magnitude.
+   *
+   * @param changes - Optional array of change objects describing modifications to the document.
+   *                - from: Starting line number of the change
+   *                - to: Ending line number of the change
+   *                - diff: Line count difference after the change
+   */
   updateDisplay(changes?: { from: number; to: number; diff?: number }[]) {
+    // Get line height and calculate visible line range
     let lh = this.lineHeight();
 
+    // Calculate first visible line based on scroll position
     let top = this.code.scrollTop - (this.space as HTMLElement).offsetTop;
     let visibleFrom = Math.max(0, Math.floor(top / lh));
+
+    // Calculate last visible line based on viewport height
     let visibleTo = Math.floor(
       Math.min(this.lines.length, (top + this.div.clientHeight) / lh)
     );
 
+    // Initialize intact regions with current display range
     let intact = [{ from: this.showingFrom, to: this.showingTo, at: 0 }];
+
+    // Process each change and update intact regions
     for (let i = 0, l = changes ? changes.length : 0; i < l; i++) {
       let change = changes![i];
       let intact2 = [];
       let diff = change.diff || 0;
+
+      // Adjust intact regions based on each change
       for (let j = 0; j < intact.length; j++) {
         let range = intact[j];
 
         if (change.to <= range.from) {
+          // Change is before the range - shift range
           intact2.push({
             from: range.from + diff,
             to: range.to + diff,
             at: range.at,
           });
         } else if (range.to <= change.from) {
+          // Change is after this range, keep range as is
           intact2.push(range);
         } else {
+          // Change overlaps this range - Split if necessary
           if (change.from > range.from) {
+            // Preserve unchanged prefix
             intact2.push({
               from: range.from,
               to: change.from,
@@ -979,6 +1034,7 @@ export class AscendEditor {
           }
 
           if (change.to < range.to) {
+            // Preserve unchange suffix
             intact2.push({
               from: change.to + diff,
               to: range.to + diff,
@@ -991,25 +1047,40 @@ export class AscendEditor {
       intact = intact2;
     }
 
+    // Calculate display update range with padding
     let from = Math.min(this.showingFrom, Math.max(visibleFrom - 3, 0));
     let to = Math.floor(
       Math.max(this.showingTo, Math.min(visibleTo + 3, this.lines.length))
     );
 
+    // Track display updates and position
     let updates = [];
     let pos = from;
     let at = from - this.showingFrom;
     let changedLines = 0;
 
+    // Handle initial gap if exists
     if (at > 0) {
       updates.push({ from: pos, to: pos, size: at, at: 0 });
     }
 
+    // Process intact regions to build the list of required display updates.
+    // This loop indentifies gaps b/w intact regions that need to be updated
+    // and tracks position information for proper rendering.
     for (let i = 0; i < intact.length; i++) {
       let range = intact[i];
+
+      // Skip if this intact region ends before out current position. This prevents processing regions that are
+      // completely before our update range.
       if (range.to <= pos) continue;
+
+      // Exit loop if we've reached an intact region that starts after our target end.
       if (range.from >= to) break;
+
+      // If there's a gap b/w current position and start of this intact region
+      // we need to create an update record for this gap
       if (range.from > pos) {
+        // Calculate size of the gap in the display
         let size = range.at - at;
 
         updates.push({
@@ -1022,9 +1093,12 @@ export class AscendEditor {
       }
 
       pos = range.to;
+
+      // Update display position: This calculates where we should be in the display after this intact region
       at = range.at + (range.to - range.from);
     }
 
+    // Handle final gap if exists
     if (pos < to) {
       let size = Math.floor(Math.max(0, this.showingTo - pos));
 
@@ -1038,43 +1112,73 @@ export class AscendEditor {
     }
 
     if (!updates.length) return;
+
+    // Choose between patch and refresh based on change magnitude
     if (changedLines > (visibleTo - visibleFrom) * 0.3) {
+      // If many lines changed, refresh entire display
       this.refreshDisplay(visibleFrom, visibleTo);
     } else {
+      // If few lines changed, patch specific regions
       this.patchDisplay(updates, from, to);
     }
   }
 
+  /**
+   * Completely refreshes the editor's display by rebuilding the visible content.
+   *
+   * This method is called when significant changes require a full display update, typically when the number
+   * of changed lines exceeds a threshold.
+   *
+   * The method performs these key steps:
+   * 1. Expands the update range with padding for smooth scrolling
+   * 2. Builds HTML for visible lines with propern selection highlighting
+   * 3. Updates the display's position and content
+   * 4. Updates internal display tracking state
+   *
+   * @param from - The starting line number to refresh (0-based)
+   * @param to - The ending line number to refresh
+   */
   refreshDisplay(from: number, to: number) {
+    // Add padding (10 lines) above and below the visible range for smooth scrolling
     from = Math.max(from - 10, 0);
     to = Math.min(to + 10, this.lines.length);
 
-    let html = [];
-    let start = { line: from, ch: 0 };
+    let html = []; // Stores HTML fragments for each line
+    let start = { line: from, ch: 0 }; // Starting position for selection handling
+
+    // Determine if we're starting within a selection
+    // True if selection starts before visible range and ends after visible range start
     let inSel =
       positionLess(this.selection.from, start) &&
       !positionLess(this.selection.to, start);
 
+    // Iterate through each visible line
     for (let i = from; i < to; i++) {
-      let ch1 = null;
-      let ch2 = null;
+      let ch1 = null; // Selection start character
+      let ch2 = null; // Selection end character
 
+      // Handle selection rendering for current line
       if (inSel) {
+        // Line is fully selected from start
         ch1 = 0;
         if (this.selection.to.line == i) {
+          // Selection ends on this line
           inSel = false;
           ch2 = this.selection.to.ch;
         }
       } else if (this.selection.from.line == i) {
         if (this.selection.to.line == i) {
+          // Selectiom starts and ends on this line
           ch1 = this.selection.from.ch;
           ch2 = this.selection.to.ch;
         } else {
+          // Selection starts on this line and continues
           inSel = true;
           ch1 = this.selection.from.ch;
         }
       }
 
+      // Generate HTML for th eline with proper selection highlighting
       html.push(
         "<div>",
         this.lines[i].getHTML(ch1 as number, ch2 as number),
@@ -1082,73 +1186,109 @@ export class AscendEditor {
       );
     }
 
+    // Update the visible content with generated HTML
     (this.visible as HTMLElement).innerHTML = html.join("");
+
+    // Update internal display state tracking
     this.showingFrom = from;
     this.showingTo = to;
 
+    // Position the visible content relative to editor viewport
     (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
   }
 
+  /**
+   * Efficiently updates specific regions of the editor's display without refreshing the entire view.
+   * This method performs targeted updates to the display by patching only the modified regions, making
+   * it more efficient than a full refresh when changes are small.
+   *
+   * This method handles:
+   * 1. Adding or removing DOM nodes for line changes
+   * 2. Updating line content with proper selection highlighting
+   * 3. Adjusting the display position and state tracking
+   *
+   * @param updates - Array of update objects describing regions to patch
+   * @param from - Starting line number of the overall update range
+   * @param to - Ending line number of the overall update range
+   */
   patchDisplay(
     updates: { from: number; to: number; size: number; at: number }[],
     from: number,
     to: number
   ) {
+    // Track selection line boundaries for highlighting
     let sfrom = this.selection.from.line;
     let sto = this.selection.to.line;
-    let off = 0;
+    let off = 0; // tracker for node positioning
 
+    // Process each update region
     for (let i = 0; i < updates.length; i++) {
       let rec = updates[i];
 
+      // Calculate the diff in size b/w old and new content
       let extra = rec.to - rec.from - rec.size;
 
       if (extra) {
+        // Get reference node for insertion/deletion
         let nodeAfter = this.visible?.childNodes[rec.at + off + rec.size];
 
+        // Remove nodes if region shrank
         for (let j = Math.max(0, -extra); j > 0; j--) {
           this.visible?.removeChild(
             nodeAfter ? nodeAfter.previousSibling! : this.visible.lastChild!
           );
         }
 
+        // Add nodes if region grew
         for (let j = Math.max(0, extra); j > 0; j--) {
           this.visible?.insertBefore(document.createElement("div"), nodeAfter!);
         }
       }
 
+      // Get starting node for content updates
       let node = this.visible?.childNodes[rec.at + off];
+      // Track if we're within selection
       let inSel = sfrom < rec.from && sto >= rec.from;
 
+      // Update content of each line in the region
       for (let j = rec.from; j < rec.to; j++) {
         let ch1 = null;
         let ch2 = null;
+
+        // Handle selection rendering
         if (inSel) {
           ch1 = 0;
           if (sto == j) {
+            // Selection ends on this line
+
             inSel = false;
             ch2 = this.selection.to.ch;
           }
         } else if (sfrom == j) {
+          // Selection starts on this line
           if (sto == j) {
+            // Selection starts and end on this line
             ch1 = this.selection.from.ch;
             ch2 = this.selection.to.ch;
           } else {
+            // Selection starts here and continues
             inSel = true;
             ch1 = this.selection.from.ch;
           }
         }
 
+        // Update node content with highlighted HTML
         (node as HTMLElement).innerHTML = this.lines[j].getHTML(ch1!, ch2!);
         node = node?.nextSibling!;
       }
       off += extra;
-
-      this.showingFrom = from;
-      this.showingTo = to;
-
-      (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
     }
+
+    // Update display state tracking and visible content position
+    this.showingFrom = from;
+    this.showingTo = to;
+
+    (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
   }
 
   restartBlink() {
@@ -1160,17 +1300,30 @@ export class AscendEditor {
     }, 650);
   }
 
+  /**
+   * Calculates the cursor position in the editor based on mouse coordinates.
+   * This method converts screen coordinates from a mouse event into document coordinates
+   * (line and character) within the editor.
+   * @param e - Custom mouse event
+   * @returns
+   */
   posFromMouse(e: AsEvent) {
+    // Get editor element's offset from document edge
     let off = eltOffset(this.space as HTMLElement);
+
+    // Calculate coordinates relative to editor space
     let x = (e.e as MouseEvent).pageX - off.left;
     let y = (e.e as MouseEvent).pageY - off.top;
 
+    // If click was on code element and above last line, return null
     if (e.target() == this.code && y < this.lines.length * this.lineHeight()) {
       return null;
     }
 
+    // Convert vertical position to line number
     let line = Math.floor(y / this.lineHeight());
 
+    // Convert position to editor coordinates and ensure it's within bounds
     return this.clipPosition({
       line: line,
       ch: this.charFromX(line, x),
@@ -1213,14 +1366,22 @@ export class AscendEditor {
     };
   }
 
+  /**
+   * Updates the cursor's visual position and visibility in the editor.
+   * This method handles both the cursor positioning for a single cursor and cursor
+   * visibility when there's a text selection
+   */
   updateCursor() {
+    // If selection start and end are the same
     if (positionEqual(this.selection.from, this.selection.to)) {
+      // Position cursor at the start point
       this.cursor.style.top =
         this.selection.from.line * this.lineHeight() + "px";
       this.cursor.style.left =
         this.charX(this.selection.from.line, this.selection.from.ch) + "px";
       this.cursor.style.display = "";
     } else {
+      // Hide cursor when there's a selection range
       this.cursor.style.display = "none";
     }
   }
