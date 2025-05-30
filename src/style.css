@@ -81,12 +81,12 @@ body {
   background: #88f !important;
 }
 
-.ascend-editor-line-numbers {
-  @apply bg-gray-500 border-r-1 border-gray-700 text-gray-100 text-right float-left -mt-[0.4em] mr-[0.4em]      
+.ascend-editor-gutter {
+  @apply bg-gray-500 h-full border-r-1 border-gray-700 text-gray-100 text-right float-left -mt-[0.4em] mr-[0.4em]      
   -mb-[0.4em]      
   -ml-[0.4em]      
   pt-[0.4em]       
   pr-[0.2em]           
   pb-[0.4em]      
-  pl-[0.4em];
+  pl-[0.6em];
 }

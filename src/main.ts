@@ -36,6 +36,9 @@ export class AscendEditor {
   showingTo: number = 0;
   measure: HTMLSpanElement;
   lineNumbers?: HTMLDivElement;
+  lineDiv: HTMLElement;
+  gutter: HTMLElement;
+  mover: HTMLElement;
   selectionChanged: any;
   lines: Array<Line>;
   selection: { from: Position; to: Position; inverted?: boolean };
@@ -103,28 +106,40 @@ export class AscendEditor {
     this.options = options;
 
     const div = (this.div = document.createElement("div"));
+    div.className = "ascend-editor";
+
+    div.innerHTML =
+      '<textarea style="position: absolute; width: 10000px; left: -100000px; top: -100000px;"></textarea>' +
+      '<div class="ascend-editor-code">' +
+      '<div style="position: relative"><div><div class="ascend-editor-gutter"></div>' +
+      '<div style="position: relative"><div style="position: absolute; visibility: hidden"><span>-</span></div>' +
+      '<span class="ascend-editor-cursor">&nbsp;</span><div class="ascend-editor-lines"></div></div></div></div>';
+
     if (place.appendChild) {
       place.appendChild(div);
     } else {
       place(div);
     }
-    div.className = "ascend-editor";
 
-    div.innerHTML =
-      '<textarea style="position: absolute; width: 10000px; left: -100000px; top: -100000px;"></textarea>\
-<div class="ascend-editor-code"><div style="position: absolute; visibility: hidden"><span>-</span></div>\
-<div style="position: relative"><span class="ascend-editor-cursor"> </span><div style="position: absolute; left: 0;"></div></div></div>';
-    const textarea = (this.input = div.querySelector(
-      "textarea"
-    ) as HTMLTextAreaElement);
+    const textarea = (this.input = div.firstChild as HTMLTextAreaElement);
     const code = (this.code = div.lastChild as HTMLDivElement);
-    this.measure = code.firstChild as HTMLSpanElement;
-    const space = (this.space = code.lastChild);
-    this.cursor = space?.firstChild as HTMLSpanElement;
-    this.visible = this.cursor.nextSibling;
+    const space = (this.space = code.firstChild);
+    const mover = (this.mover = space?.firstChild as HTMLElement);
+    const gutter = (this.gutter = mover?.firstChild as HTMLElement);
+    const measure = (this.measure = mover?.lastChild
+      ?.firstChild as HTMLElement);
+    const cursor = (this.cursor = measure?.nextSibling as HTMLElement);
+    const lineDiv = (this.lineDiv = cursor?.nextSibling as HTMLElement);
+
+    console.log(code);
+    console.log(space);
 
     if (options.tabIndex != null) {
       this.input.tabIndex = options.tabIndex;
+    }
+
+    if (!options.lineNumbers) {
+      (gutter as HTMLElement).style.display = "none";
     }
 
     // if (options.lineNumbers) {
@@ -482,8 +497,8 @@ export class AscendEditor {
     }
 
     // Update display state
-    this.showingFrom = updateLine(this.showingFrom);
-    this.showingTo = updateLine(this.showingTo);
+    // this.showingFrom = updateLine(this.showingFrom);
+    // this.showingTo = updateLine(this.showingTo);
 
     // Update selection state
     this.setSelection(
@@ -504,7 +519,11 @@ export class AscendEditor {
    *
    * @param on - A boolean value indicating the desired state of line numbers.
    */
-  setLineNumbers(on: boolean) {}
+  setLineNumbers(on: boolean) {
+    this.options.lineNumbers = on;
+    this.gutter.style.display = on ? "" : "none";
+    if (on) this.updateGutter();
+  }
 
   /**
    * Helper function for implementing undo/redo in the editor. Handles the process of
@@ -1050,7 +1069,7 @@ export class AscendEditor {
     // Calculate display update range with padding
     let from = Math.min(this.showingFrom, Math.max(visibleFrom - 3, 0));
     let to = Math.floor(
-      Math.max(this.showingTo, Math.min(visibleTo + 3, this.lines.length))
+      Math.max(this.lines.length, Math.max(this.showingTo, visibleTo + 3))
     );
 
     // Track display updates and position
@@ -1062,6 +1081,9 @@ export class AscendEditor {
     // Handle initial gap if exists
     if (at > 0) {
       updates.push({ from: pos, to: pos, size: at, at: 0 });
+    } else if (at < 0) {
+      at = 0;
+      pos -= at;
     }
 
     // Process intact regions to build the list of required display updates.
@@ -1187,14 +1209,17 @@ export class AscendEditor {
     }
 
     // Update the visible content with generated HTML
-    (this.visible as HTMLElement).innerHTML = html.join("");
+    this.lineDiv.innerHTML = html.join("");
 
     // Update internal display state tracking
     this.showingFrom = from;
     this.showingTo = to;
 
     // Position the visible content relative to editor viewport
-    (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
+    this.mover.style.top = from * this.lineHeight() + "px";
+    this.gutter.style.top = from * this.lineHeight() + "px";
+
+    this.updateGutter();
   }
 
   /**
@@ -1230,23 +1255,23 @@ export class AscendEditor {
 
       if (extra) {
         // Get reference node for insertion/deletion
-        let nodeAfter = this.visible?.childNodes[rec.at + off + rec.size];
+        let nodeAfter = this.lineDiv.childNodes[rec.at + off + rec.size];
 
         // Remove nodes if region shrank
         for (let j = Math.max(0, -extra); j > 0; j--) {
-          this.visible?.removeChild(
-            nodeAfter ? nodeAfter.previousSibling! : this.visible.lastChild!
+          this.lineDiv.removeChild(
+            nodeAfter ? nodeAfter.previousSibling! : this.lineDiv.lastChild!
           );
         }
 
         // Add nodes if region grew
         for (let j = Math.max(0, extra); j > 0; j--) {
-          this.visible?.insertBefore(document.createElement("div"), nodeAfter!);
+          this.lineDiv.insertBefore(document.createElement("div"), nodeAfter!);
         }
       }
 
       // Get starting node for content updates
-      let node = this.visible?.childNodes[rec.at + off];
+      let node = this.lineDiv.childNodes[rec.at + off];
       // Track if we're within selection
       let inSel = sfrom < rec.from && sto >= rec.from;
 
@@ -1288,7 +1313,34 @@ export class AscendEditor {
     this.showingFrom = from;
     this.showingTo = to;
 
-    (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
+    this.lineDiv.style.top = from * this.lineHeight() + "px";
+    this.gutter.style.top = from * this.lineHeight() + "px";
+    if (off) {
+      this.updateGutter();
+    }
+  }
+
+  updateGutter() {
+    if (this.gutter.style.display == "none") return;
+
+    // this.gutter.style.height =
+    //   Math.max(
+    //     this.lineDiv.offsetHeight,
+    //     this.code.clientHeight - 2 * (this.space as HTMLElement).offsetTop
+    //   ) + "px";
+
+    let html = [];
+
+    if (this.options.lineNumbers) {
+      for (let i = this.showingFrom; i < this.showingTo; i++) {
+        html.push("<div>" + (i + 1) + "</div>");
+      }
+
+      this.gutter.innerHTML = html.join("");
+
+      (this.lineDiv.parentNode as HTMLElement).style.marginLeft =
+        this.gutter.offsetWidth + "px";
+    }
   }
 
   restartBlink() {
@@ -1308,8 +1360,8 @@ export class AscendEditor {
    * @returns
    */
   posFromMouse(e: AsEvent) {
-    // Get editor element's offset from document edge
-    let off = eltOffset(this.space as HTMLElement);
+    // Get editor line element's offset from document edge
+    let off = eltOffset(this.lineDiv as HTMLElement);
 
     // Calculate coordinates relative to editor space
     let x = (e.e as MouseEvent).pageX - off.left;
@@ -1321,12 +1373,13 @@ export class AscendEditor {
     }
 
     // Convert vertical position to line number
-    let line = Math.floor(y / this.lineHeight());
+    let line = this.showingFrom + Math.floor(y / this.lineHeight());
+    let clipLine = Math.min(Math.max(0, line), this.lines.length - 1);
 
     // Convert position to editor coordinates and ensure it's within bounds
     return this.clipPosition({
       line: line,
-      ch: this.charFromX(line, x),
+      ch: this.charFromX(clipLine, x),
     });
   }
 
@@ -1376,7 +1429,8 @@ export class AscendEditor {
     if (positionEqual(this.selection.from, this.selection.to)) {
       // Position cursor at the start point
       this.cursor.style.top =
-        this.selection.from.line * this.lineHeight() + "px";
+        (this.selection.from.line - this.showingFrom) * this.lineHeight() +
+        "px";
       this.cursor.style.left =
         this.charX(this.selection.from.line, this.selection.from.ch) + "px";
       this.cursor.style.display = "";
@@ -2016,12 +2070,15 @@ export class AscendEditor {
   endOperation() {
     if (this.selectionChanged) {
       // If the selection has changed, update the display to reflect the new selection.
-      this.updateCursor();
-      this.restartBlink();
       this.scrollCursorIntoView();
     }
 
     if (this.changes.length) this.updateDisplay(this.changes);
+
+    if (this.changes.length) {
+      this.updateCursor();
+      this.restartBlink();
+    }
 
     // Check if the selection spans multiple lines or if lines have been shifted.
     if (
