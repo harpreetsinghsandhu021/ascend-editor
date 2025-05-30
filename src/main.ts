@@ -32,7 +32,7 @@ export class AscendEditor {
   updates: { from: number; to: number; size: number; at: number }[] = [];
   space: ChildNode | null;
   changes: { from: number; to: number; diff?: number }[] = [];
-  visible: ChildNode | null;
+  // visible: ChildNode | null;
   showingFrom: number = 0;
   showingTo: number = 0;
   measure: HTMLSpanElement;
@@ -167,7 +167,7 @@ export class AscendEditor {
 
     setTimeout(() => {
       this.prepareInputArea();
-    }, 0);
+    }, 20);
 
     const self = this;
     connect(code, "mousedown", this.operation(this.onMouseDown));
@@ -594,7 +594,7 @@ export class AscendEditor {
   onKeyUp(e: AsEvent) {
     if (this.reducedSelection) {
       this.reducedSelection = null;
-      this.prepareInputArea();
+      this.updateInput = true;
     }
 
     if ((e.e as KeyboardEvent).shiftKey) {
@@ -1308,8 +1308,6 @@ export class AscendEditor {
             ch1 = this.selection.from.ch;
           }
         }
-
-        console.log(this.lines[j]);
 
         if (this.lines[j]) {
           // Update node content with highlighted HTML
@@ -2099,7 +2097,7 @@ export class AscendEditor {
       this.updateInput === true ||
       (this.updateInput !== false && this.selectionChanged)
     ) {
-      this.prepareInputArea();
+      setTimeout(() => this.prepareInputArea(), 20);
     }
 
     if (this.selectionChanged && this.options.onCursorActivity) {

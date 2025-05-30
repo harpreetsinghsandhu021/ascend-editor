@@ -18,15 +18,16 @@ export function eltOffset(node: HTMLElement): Offset {
   let x = 0;
   let y = 0;
 
-  while (node) {
-    x += node.offsetLeft;
-    y += node.offsetTop;
-    node = node.offsetParent as HTMLElement;
+  let originalNode = node;
+  while (originalNode) {
+    x += originalNode.offsetLeft;
+    y += originalNode.offsetTop;
+    originalNode = originalNode.offsetParent as HTMLElement;
   }
 
   while (node && node != document.body) {
-    x -= (node as HTMLElement).scrollLeft;
-    y -= (node as HTMLElement).scrollTop;
+    x -= node.scrollLeft;
+    y -= node.scrollTop;
     node = node.parentNode as HTMLElement;
   }
 
