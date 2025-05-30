@@ -46,6 +46,7 @@ export class Line {
     copyStyles(0, from, this.styles, st);
     if (text) st.push(text, null);
 
+    copyStyles(to, this.text?.length!, this.styles, st);
     this.styles = st;
     this.text = this.text?.slice(0, from) + text + this.text?.slice(to);
     this.stateAfter = null;

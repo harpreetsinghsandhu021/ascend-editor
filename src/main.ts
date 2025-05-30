@@ -30,7 +30,7 @@ export class AscendEditor {
   cursor: HTMLSpanElement;
   updates: { from: number; to: number; size: number; at: number }[] = [];
   space: ChildNode | null;
-  changes: { from: number; to: number; diff: number }[] = [];
+  changes: { from: number; to: number; diff?: number }[] = [];
   visible: ChildNode | null;
   showingFrom: number = 0;
   showingTo: number = 0;
@@ -640,8 +640,11 @@ export class AscendEditor {
     let id = (ctrl ? "c" : "") + key;
 
     if (this.selection.inverted && movementKeys[id]) {
-      this.reducedSelection = { anchor: this.input.selectionStart };
-      this.input.selectionEnd = this.input.selectionStart;
+      const range = this.selRange(this.input);
+      if (range) {
+        this.reducedSelection = { anchor: range.start };
+        this.setSelRange(this.input, range.start, range.start);
+      }
     }
 
     this.fastPoll(20, id);
@@ -885,8 +888,8 @@ export class AscendEditor {
 
       // Calculate final ending position
       // Find last newline in the changed region
-      newLine = this.editing.text.lastIndexOf("\n", end - 1);
-      let endCh = newLine == -1 ? end - 1 : end - newLine - 2;
+      newLine = this.editing.text.lastIndexOf("\n", edEnd - 1);
+      let endCh = newLine == -1 ? edEnd : edEnd - newLine - 1;
 
       // Update the text content with the identified change boundaries
       this.replaceLines(
@@ -941,26 +944,27 @@ export class AscendEditor {
     }
   }
 
-  updateDisplay(changes?: { from: number; to: number; diff: number }[]) {
+  updateDisplay(changes?: { from: number; to: number; diff?: number }[]) {
     let lh = this.lineHeight();
+
     let top = this.code.scrollTop - (this.space as HTMLElement).offsetTop;
     let visibleFrom = Math.max(0, Math.floor(top / lh));
-    let visibleTo = Math.min(
-      this.lines.length,
-      Math.ceil(top + this.div.clientHeight) / lh
+    let visibleTo = Math.floor(
+      Math.min(this.lines.length, (top + this.div.clientHeight) / lh)
     );
 
     let intact = [{ from: this.showingFrom, to: this.showingTo, at: 0 }];
     for (let i = 0, l = changes ? changes.length : 0; i < l; i++) {
       let change = changes![i];
       let intact2 = [];
+      let diff = change.diff || 0;
       for (let j = 0; j < intact.length; j++) {
         let range = intact[j];
 
         if (change.to <= range.from) {
           intact2.push({
-            from: range.from + change.diff,
-            to: range.to + change.diff,
+            from: range.from + diff,
+            to: range.to + diff,
             at: range.at,
           });
         } else if (range.to <= change.from) {
@@ -972,15 +976,18 @@ export class AscendEditor {
               to: change.from,
               at: range.at,
             });
-          } else {
+          }
+
+          if (change.to < range.to) {
             intact2.push({
-              from: change.to + change.diff,
-              to: range.to + change.diff,
+              from: change.to + diff,
+              to: range.to + diff,
               at: range.at + (change.to - range.from),
             });
           }
         }
       }
+
       intact = intact2;
     }
 
@@ -1004,6 +1011,7 @@ export class AscendEditor {
       if (range.from >= to) break;
       if (range.from > pos) {
         let size = range.at - at;
+
         updates.push({
           from: pos,
           to: range.from,
@@ -1014,13 +1022,19 @@ export class AscendEditor {
       }
 
       pos = range.to;
-      at = range.to + (range.to - range.from);
+      at = range.at + (range.to - range.from);
     }
 
     if (pos < to) {
-      let size = Math.max(0, this.showingTo - this.showingFrom);
-      changedLines += Math.floor(to - pos);
-      updates.push({ from: pos, to: to, size: size, at: at });
+      let size = Math.floor(Math.max(0, this.showingTo - pos));
+
+      changedLines += to - pos;
+      updates.push({
+        from: Math.floor(pos),
+        to: to,
+        size: size,
+        at: Math.floor(at),
+      });
     }
 
     if (!updates.length) return;
@@ -1132,7 +1146,6 @@ export class AscendEditor {
 
       this.showingFrom = from;
       this.showingTo = to;
-      console.log(from * this.lineHeight() + "px");
 
       (this.visible as HTMLElement).style.top = from * this.lineHeight() + "px";
     }
@@ -1367,23 +1380,21 @@ export class AscendEditor {
 
     if (positionEqual(from, to)) {
       if (!positionEqual(sel.from, sel.to)) {
-        this.changes.push({ from: oldFrom, to: oldTo! + 1, diff: 0 });
+        this.changes.push({ from: oldFrom, to: oldTo! + 1 });
       }
     } else if (positionEqual(sel.from, sel.to)) {
-      this.changes.push({ from: from.line, to: to.line + 1, diff: 0 });
+      this.changes.push({ from: from.line, to: to.line + 1 });
     } else {
       if (!positionEqual(from, sel.from)) {
         if (from.line < oldFrom) {
           this.changes.push({
             from: from.line,
             to: Math.min(to.line, oldFrom) + 1,
-            diff: 0,
           });
         } else {
           this.changes.push({
             from: oldFrom,
             to: Math.min(oldTo!, from.line) + 1,
-            diff: 0,
           });
         }
       }
@@ -1394,13 +1405,11 @@ export class AscendEditor {
         this.changes.push({
           from: Math.max(oldFrom, from.line),
           to: oldTo! + 1,
-          diff: 0,
         });
       } else {
         this.changes.push({
           from: Math.max(from.line, oldTo!),
           to: to.line + 1,
-          diff: 0,
         });
       }
     }
@@ -1712,27 +1721,41 @@ export class AscendEditor {
    */
   highlightWorker() {
     const end = Number(new Date()) + this.options.workTime; // time limit for highlighting
+    let task: number;
 
     // Loop through the work queue
     while (this.work.length) {
-      let task = this.work.pop()!;
+      // Determine which line to process next
+      if (!this.lines[this.showingFrom].stateAfter) {
+        // If first visible line needs highlighting prioritize it
+        task = this.showingFrom;
+      } else {
+        // Otherwise take next line from work queue
+        task = this.work.pop() as number;
+      }
 
       // Skip lines that have already been highlighted
       if (task >= this.lines.length || this.lines[task].stateAfter) continue;
 
-      let state: any;
+      let i = task;
 
-      if (task) {
-        // Get the state from the previous line
-        state = this.lines[task - 1].stateAfter;
-        if (!state) continue;
+      // Find the most recent valid state to start from
+      // Look back up to 50 lines to find a cached state
+      let state: any;
+      for (let i = task - 1; i >= Math.max(0, task - 50) && !state; i--) {
+        state = this.lines[i].stateAfter;
+      }
+
+      // Create new state if none found
+      if (state) {
         state = copyState(state);
       } else {
         // Start with the initial parser state
         state = this.parser.startState(this.options);
       }
 
-      for (let i = task; i < this.lines.length; i++) {
+      // Process lines until we run out of time or hit end of document.
+      for (i = task; i < this.lines.length; i++) {
         const line = this.lines[i];
 
         if (line.stateAfter) break;
@@ -1741,23 +1764,22 @@ export class AscendEditor {
         if (Number(new Date()) > end) {
           this.work.push(i);
           this.startWorker(this.options.workDelay);
-          return;
+          break;
         }
 
         // Highlight the current line and update its state
         line.highlight(this.parser, state);
         line.stateAfter = copyState(state);
       }
+
+      this.changes.push({ from: task, to: i });
     }
   }
 
   // Start the background highlighting worker
   startWorker(time: number) {
     if (!this.work.length) return;
-    const self = this;
-    this.highlight.set(time, function () {
-      self.highlightWorker();
-    });
+    this.highlight.set(time, this.operation(this.highlightWorker));
   }
 
   /**
@@ -1873,12 +1895,11 @@ export class AscendEditor {
         self.startOperation();
       }
       nestedOperation++;
-
+      let result;
       try {
         // Prepare for the operation.
         // Apply the original function "f" to the current context "self" with the provided arguments.
-        let result = f.apply(self, arguments);
-        return result;
+        result = f.apply(self, arguments);
       } finally {
         nestedOperation--;
         // End operation only when exiting the outermost call
@@ -1887,6 +1908,8 @@ export class AscendEditor {
           self.endOperation();
         }
       }
+
+      return result;
     };
   }
 
