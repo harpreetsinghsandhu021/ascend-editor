@@ -27,6 +27,7 @@ export class AscendEditor {
   div: HTMLDivElement;
   input: HTMLTextAreaElement;
   code: HTMLDivElement;
+  inputDiv: HTMLElement;
   cursor: HTMLSpanElement;
   updates: { from: number; to: number; size: number; at: number }[] = [];
   space: ChildNode | null;
@@ -109,10 +110,11 @@ export class AscendEditor {
     div.className = "ascend-editor";
 
     div.innerHTML =
-      '<textarea style="position: absolute; width: 10000px; left: -100000px; top: -100000px;"></textarea>' +
       '<div class="ascend-editor-code">' +
-      '<div style="position: relative"><div><div class="ascend-editor-gutter"></div>' +
+      '<div style="position: relative"><div style="position: absolute"><div class="ascend-editor-gutter"></div>' +
       '<div style="position: relative"><div style="position: absolute; visibility: hidden"><span>-</span></div>' +
+      '<div style="overflow: hidden; position: absolute; width: 0">' +
+      '<textarea style="position: absolute; width: 10000px;"></textarea></div>' +
       '<span class="ascend-editor-cursor">&nbsp;</span><div class="ascend-editor-lines"></div></div></div></div>';
 
     if (place.appendChild) {
@@ -121,18 +123,16 @@ export class AscendEditor {
       place(div);
     }
 
-    const textarea = (this.input = div.firstChild as HTMLTextAreaElement);
     const code = (this.code = div.lastChild as HTMLDivElement);
     const space = (this.space = code.firstChild);
     const mover = (this.mover = space?.firstChild as HTMLElement);
     const gutter = (this.gutter = mover?.firstChild as HTMLElement);
     const measure = (this.measure = mover?.lastChild
       ?.firstChild as HTMLElement);
-    const cursor = (this.cursor = measure?.nextSibling as HTMLElement);
+    const inputDiv = (this.inputDiv = measure.nextSibling as HTMLElement);
+    const cursor = (this.cursor = inputDiv?.nextSibling as HTMLElement);
     const lineDiv = (this.lineDiv = cursor?.nextSibling as HTMLElement);
-
-    console.log(code);
-    console.log(space);
+    const textarea = (this.input = inputDiv.firstChild as HTMLTextAreaElement);
 
     if (options.tabIndex != null) {
       this.input.tabIndex = options.tabIndex;
@@ -810,7 +810,10 @@ export class AscendEditor {
         // Find the next newline character
         let found = text.indexOf("\n", pos);
         // If no more newlines or the newline is beyond our target position
-        if (found == -1 || found >= n) {
+        if (
+          found == -1 ||
+          (text.charAt(found - 1) == "\r" ? found - 1 : found >= n)
+        ) {
           // Return the current line and character offset
           return { line: startLine, ch: n - pos };
         }
@@ -1077,10 +1080,12 @@ export class AscendEditor {
     let pos = from;
     let at = from - this.showingFrom;
     let changedLines = 0;
+    let added = 0;
 
     // Handle initial gap if exists
     if (at > 0) {
       updates.push({ from: pos, to: pos, size: at, at: 0 });
+      added -= at;
     } else if (at < 0) {
       at = 0;
       pos -= at;
@@ -1112,6 +1117,7 @@ export class AscendEditor {
           at: at,
         });
         changedLines += Math.floor(range.from - pos);
+        added += Math.floor(range.from - pos) - size;
       }
 
       pos = range.to;
@@ -1122,7 +1128,7 @@ export class AscendEditor {
 
     // Handle final gap if exists
     if (pos < to) {
-      let size = Math.floor(Math.max(0, this.showingTo - pos));
+      let size = Math.floor(Math.max(0, this.showingTo + added - pos));
 
       changedLines += to - pos;
       updates.push({
@@ -1217,7 +1223,7 @@ export class AscendEditor {
 
     // Position the visible content relative to editor viewport
     this.mover.style.top = from * this.lineHeight() + "px";
-    this.gutter.style.top = from * this.lineHeight() + "px";
+    // this.gutter.style.top = from * this.lineHeight() + "px";
 
     this.updateGutter();
   }
@@ -1251,7 +1257,8 @@ export class AscendEditor {
       let rec = updates[i];
 
       // Calculate the diff in size b/w old and new content
-      let extra = rec.to - rec.from - rec.size;
+      // prettier-ignore
+      let extra = (rec.to - rec.from) - rec.size;
 
       if (extra) {
         // Get reference node for insertion/deletion
@@ -1302,9 +1309,13 @@ export class AscendEditor {
           }
         }
 
-        // Update node content with highlighted HTML
-        (node as HTMLElement).innerHTML = this.lines[j].getHTML(ch1!, ch2!);
-        node = node?.nextSibling!;
+        console.log(this.lines[j]);
+
+        if (this.lines[j]) {
+          // Update node content with highlighted HTML
+          (node as HTMLElement).innerHTML = this.lines[j].getHTML(ch1!, ch2!);
+          node = node.nextSibling!;
+        }
       }
       off += extra;
     }
@@ -1313,8 +1324,7 @@ export class AscendEditor {
     this.showingFrom = from;
     this.showingTo = to;
 
-    this.lineDiv.style.top = from * this.lineHeight() + "px";
-    this.gutter.style.top = from * this.lineHeight() + "px";
+    this.mover.style.top = from * this.lineHeight() + "px";
     if (off) {
       this.updateGutter();
     }
@@ -1425,15 +1435,19 @@ export class AscendEditor {
    * visibility when there's a text selection
    */
   updateCursor() {
+    let head = this.selection.inverted
+      ? this.selection.from
+      : this.selection.to;
+    let x = this.charX(head.line, head.ch) + "px";
+    let y = (head.line - this.showingFrom) * this.lineHeight() + "px";
+
+    this.inputDiv.style.top = y;
+    this.inputDiv.style.left = x;
+
     // If selection start and end are the same
     if (positionEqual(this.selection.from, this.selection.to)) {
-      // Position cursor at the start point
-      this.cursor.style.top =
-        (this.selection.from.line - this.showingFrom) * this.lineHeight() +
-        "px";
-      this.cursor.style.left =
-        this.charX(this.selection.from.line, this.selection.from.ch) + "px";
-      this.cursor.style.display = "";
+      this.cursor.style.top = y;
+      this.cursor.style.left = x;
     } else {
       // Hide cursor when there's a selection range
       this.cursor.style.display = "none";
