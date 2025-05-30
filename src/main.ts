@@ -453,7 +453,7 @@ export class AscendEditor {
       let spliceArgs: Line[] = [];
       // Update the fist and last lines
       firstLine.replace(from.ch, firstLine.text?.length!, newText[0]);
-      firstLine.replace(0, to.ch, newText[newText.length - 1]);
+      lastLine.replace(0, to.ch, newText[newText.length - 1]);
 
       // Insert new lines in between
       for (let i = 1; i < newText.length - 1; i++) {
@@ -1072,7 +1072,7 @@ export class AscendEditor {
     // Calculate display update range with padding
     let from = Math.min(this.showingFrom, Math.max(visibleFrom - 3, 0));
     let to = Math.floor(
-      Math.max(this.lines.length, Math.max(this.showingTo, visibleTo + 3))
+      Math.min(this.lines.length, Math.max(this.showingTo, visibleTo + 3))
     );
 
     // Track display updates and position
@@ -1309,11 +1309,9 @@ export class AscendEditor {
           }
         }
 
-        if (this.lines[j]) {
-          // Update node content with highlighted HTML
-          (node as HTMLElement).innerHTML = this.lines[j].getHTML(ch1!, ch2!);
-          node = node.nextSibling!;
-        }
+        // Update node content with highlighted HTML
+        (node as HTMLElement).innerHTML = this.lines[j].getHTML(ch1!, ch2!);
+        node = node.nextSibling!;
       }
       off += extra;
     }

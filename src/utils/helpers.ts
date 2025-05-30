@@ -47,7 +47,7 @@ export function copyPosition(pos: Position): Position {
 }
 
 export function htmlEscape(str: string): string {
-  return str.replace(/[<&]/g, (str) => (str === "&" ? "&amp;" : "&lt;"));
+  return str.replace(/[<&]/g, (str) => (str == "&" ? "&amp;" : "&lt;"));
 }
 
 /**

@@ -102,7 +102,6 @@ export class Line {
     const html: string[] = [];
     const st = this.styles;
     let pos = 0;
-    let node = 0;
     let sel = sfrom === null ? 2 : 0;
 
     /**
@@ -110,7 +109,7 @@ export class Line {
      * @param text
      * @param style
      */
-    function addPiece(text: string, style: string | null): void {
+    function addPiece(text: string, style: string | null, last?: number): void {
       let cls = style;
 
       const len = text?.length; // Length of the text segment
@@ -161,20 +160,15 @@ export class Line {
       html.push(
         "<span",
         cls ? ' class="' + cls + '">' : ">",
-        htmlEscape(cut === null ? text : text.slice(0, cut)),
+        htmlEscape(!cut ? text : text.slice(0, cut)),
         "</span>"
       );
 
-      node++;
+      pos += cut || len;
 
-      // Advance the position if no cut.
-      if (cut == null) {
-        pos += len;
-      } else {
-        // Advance the position by the cut amount.
-        pos += cut;
+      if (cut) {
         // Recursively add the rest of the text.
-        addPiece(text.slice(cut), style);
+        addPiece(text.slice(cut), style, last);
       }
     }
 
@@ -182,12 +176,12 @@ export class Line {
       addPiece(st[i] as string, st[i + 1]);
     }
 
-    const empty = html.length == 0;
+    const empty = true;
 
     // Handle the case of an open-ended selection.
     if (sel === 1 && sto == null) {
       html.push('<span class="ascend-editor-selected"> </span>');
-    } else if (!html.length) {
+    } else if (empty) {
       addPiece(" ", "");
     }
 
