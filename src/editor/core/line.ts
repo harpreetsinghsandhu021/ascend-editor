@@ -86,10 +86,19 @@ export class Line {
         // Remove mark if it's flagged for deletion or became empty
         if (del || mark.from >= mark.to) {
           marked.splice(i, 1);
-          i--
+          i--;
         }
       }
     }
+  }
+
+  /**
+   * Calculates the indentation level of the line
+   * Measure leading whitespace to determine indent level
+   * @returns Number of leading whitespace characters
+   */
+  indentation(): number {
+    return this.text?.match(/^\s*/)![0].length as number;
   }
 
   /**
@@ -111,11 +120,15 @@ export class Line {
    * @param style
    */
   addMark(from: number, to: number, style: string) {
-    let mark: { from: number; to: number; style: string, line?: Line } = { from: from, to: to, style: style }
+    let mark: { from: number; to: number; style: string; line?: Line } = {
+      from: from,
+      to: to,
+      style: style,
+    };
     if (this.marked == null) this.marked = [];
     this.marked.push(mark);
     this.marked.sort((a, b) => a.from - b.from);
-    return mark
+    return mark;
   }
 
   /**
@@ -124,13 +137,13 @@ export class Line {
    * @param to
    * @param style
    */
-  removeMark(mark: { from: number, to: number, style: string }) {
+  removeMark(mark: { from: number; to: number; style: string }) {
     if (!this.marked) return;
 
     for (let i = 0; i < this.marked.length; i++) {
       if (this.marked[i] == mark) {
-        this.marked.splice(i, 1)
-        break
+        this.marked.splice(i, 1);
+        break;
       }
     }
   }
@@ -162,6 +175,13 @@ export class Line {
       } else if (substr) {
         // If the styles are different, push the substring and style to the styles array.
         this.styles.push(substr, style);
+      }
+
+      // Add performance optimization for very long lines
+      if (stream.pos > 5000) {
+        // Append remaining text without styling
+        this.styles.push(this.text?.slice(stream.pos)!, null);
+        break;
       }
     }
   }
@@ -209,9 +229,9 @@ export class Line {
     }
     // Case 3: Has marks or selection - requires careful segment handling
     else {
-      let pos = 0;      // Current position in text
-      let i = 0;        // Current index in styles array
-      let text = "";    // Current text chunk being processed
+      let pos = 0; // Current position in text
+      let i = 0; // Current index in styles array
+      let text = ""; // Current text chunk being processed
       let style = null; // Current style being applied
 
       /**
@@ -224,18 +244,17 @@ export class Line {
           let upto = pos + text.length;
 
           // Split chunk if necessary and apply style
-          span(upto > end ? text.slice(0, end - pos) : text, style!)
+          span(upto > end ? text.slice(0, end - pos) : text, style!);
           if (upto >= end) {
-            text = text.slice(end - pos)
-            pos = end
-            break
+            text = text.slice(end - pos);
+            pos = end;
+            break;
           }
-          pos = upto
-          text = st[i++]!
-          style = st[i++]
+          pos = upto;
+          text = st[i++]!;
+          style = st[i++];
         }
       }
-
 
       /**
        * Accumulates and styles text chunks up to target position
@@ -244,96 +263,103 @@ export class Line {
        * @param cStyle - Style to apply to accumulated text
        */
       function chunkUntil(end: number, cStyle: string) {
-        let acc = []
+        let acc = [];
 
         while (true) {
-          let upto = pos + text.length
+          let upto = pos + text.length;
 
           if (upto >= end) {
-            let size = end - pos
-            acc.push(text.slice(0, size))
-            span(acc.join(""), cStyle)
-            text = text.slice(size)
-            pos += size
-            break
+            let size = end - pos;
+            acc.push(text.slice(0, size));
+            span(acc.join(""), cStyle);
+            text = text.slice(size);
+            pos += size;
+            break;
           }
 
-          acc.push(text)
-          pos = upto
-          text = st[i++]!
-          style = st[i++]
+          acc.push(text);
+          pos = upto;
+          text = st[i++]!;
+          style = st[i++];
         }
       }
 
-      let markPos = 0
-      let mark: { from: number; to: number, style?: string } = { from: 0, to: 0 }
+      let markPos = 0;
+      let mark: { from: number; to: number; style?: string } = {
+        from: 0,
+        to: 0,
+      };
 
       /**
        * Locates next marker that affects current position
        * @returns Starting position of next relevant marker
        */
       function nextMark() {
-        if (!marked) return null
+        if (!marked) return null;
 
         while (markPos < marked.length) {
-          mark = marked[markPos]
-          let end = mark.to == null ? allText?.length : mark.to
+          mark = marked[markPos];
+          let end = mark.to == null ? allText?.length : mark.to;
 
           if (end! > pos) {
-            return Math.max(mark.from, pos)
+            return Math.max(mark.from, pos);
           }
 
-          markPos++
+          markPos++;
         }
       }
 
       // Main rendering loop - processes text segments with proper styling
       while (pos < allText.length) {
         // Get next marker position that affects current position in text
-        let nextmark = nextMark()
+        let nextmark = nextMark();
 
         // Case 1: SELECTION RANGE HANDLING
         // If we're at selection start and either no markers exists or selection starts before next marker
-        if (sfrom != null && sfrom >= pos && (nextmark == null || sfrom <= nextmark)) {
+        if (
+          sfrom != null &&
+          sfrom >= pos &&
+          (nextmark == null || sfrom <= nextmark)
+        ) {
           // Copy text up to selection start with current styling
-          copyUntil(sfrom)
+          copyUntil(sfrom);
 
           // If selection extends to end of line
           if (sto == null) {
             // Add remaining text with selection styling and exit loop
-            span(allText.slice(pos) + " ", "ascend-editor-selected")
-            break
+            span(allText.slice(pos) + " ", "ascend-editor-selected");
+            break;
           }
 
           // Otherwise style the selected range
-          chunkUntil(sto, "ascend-editor-selected")
+          chunkUntil(sto, "ascend-editor-selected");
         }
         // Case 2: MARKED RANGE HANDLING
         // If we have a marker starting at current position
         else if (nextmark != null) {
           // Copy text up to marker start with current styling
-          copyUntil(nextmark)
+          copyUntil(nextmark);
 
           // Calculate marker end position (end of line if not specified)
-          let end = mark.to == null ? allText.length : mark.to
+          let end = mark.to == null ? allText.length : mark.to;
 
           // Apply marker styling up either:
           // 1. Marker end if no selection or selection has'nt started
           // Selection start if it occurs before marker end
-          chunkUntil(sfrom == null || sfrom < pos ? end : Math.min(sfrom, end), mark.style!)
+          chunkUntil(
+            sfrom == null || sfrom < pos ? end : Math.min(sfrom, end),
+            mark.style!
+          );
         }
 
         // Case 3: DEFAULT HANDLING
         // No markers or selection affecting current position
         else {
-
           // Copy remaining text with currenrt styling
-          copyUntil(allText.length)
+          copyUntil(allText.length);
         }
       }
-
-
     }
-    return html.join("")
+    return html.join("");
   }
 }

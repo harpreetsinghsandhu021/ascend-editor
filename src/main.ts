@@ -1149,14 +1149,29 @@ export class AscendEditor {
     }
 
     if (!updates.length) return;
+    this.lineDiv.style.display = "none";
 
     // Choose between patch and refresh based on change magnitude
     if (changedLines > (visibleTo - visibleFrom) * 0.3) {
       // If many lines changed, refresh entire display
-      this.refreshDisplay(visibleFrom, visibleTo);
+      // Add padding (10 lines) above and 7 lines below the visible range for smooth scrolling
+      this.refreshDisplay(
+        (from = Math.max(visibleFrom - 10, 0)),
+        (to = Math.min(visibleTo + 7, this.lines.length))
+      );
     } else {
       // If few lines changed, patch specific regions
       this.patchDisplay(updates, from, to);
+    }
+
+    this.lineDiv.style.display = "";
+
+    let different = from != this.showingFrom || to != this.showingTo;
+    this.showingFrom = from;
+    this.showingTo = to;
+    this.mover.style.top = from * this.lineHeight() + "px";
+    if (different) {
+      this.updateGutter();
     }
   }
 
@@ -1176,10 +1191,6 @@ export class AscendEditor {
    * @param to - The ending line number to refresh
    */
   refreshDisplay(from: number, to: number) {
-    // Add padding (10 lines) above and below the visible range for smooth scrolling
-    from = Math.max(from - 10, 0);
-    to = Math.min(to + 10, this.lines.length);
-
     let html = []; // Stores HTML fragments for each line
     let start = { line: from, ch: 0 }; // Starting position for selection handling
 
@@ -1225,16 +1236,6 @@ export class AscendEditor {
 
     // Update the visible content with generated HTML
     this.lineDiv.innerHTML = html.join("");
-
-    // Update internal display state tracking
-    this.showingFrom = from;
-    this.showingTo = to;
-
-    // Position the visible content relative to editor viewport
-    this.mover.style.top = from * this.lineHeight() + "px";
-    // this.gutter.style.top = from * this.lineHeight() + "px";
-
-    this.updateGutter();
   }
 
   /**
@@ -1325,15 +1326,6 @@ export class AscendEditor {
       }
       off += extra;
     }
-
-    // Update display state tracking and visible content position
-    this.showingFrom = from;
-    this.showingTo = to;
-
-    this.mover.style.top = from * this.lineHeight() + "px";
-    if (off) {
-      this.updateGutter();
-    }
   }
 
   updateGutter() {
@@ -1352,7 +1344,9 @@ export class AscendEditor {
         html.push("<div>" + (i + 1) + "</div>");
       }
 
+      this.gutter.style.display = "none";
       this.gutter.innerHTML = html.join("");
+      this.gutter.style.display = "";
 
       (this.lineDiv.parentNode as HTMLElement).style.marginLeft =
         this.gutter.offsetWidth + "px";
@@ -1859,12 +1853,12 @@ export class AscendEditor {
     let state = this.getStateBefore(n);
     if (!state) return;
 
-    let text = this.lines[n].text!;
+    let line = this.lines[n];
     // Determines the current amount of whitespace at the beginning of the line.
-    let currSpace = text.match(/^\s*/)![0].length;
+    let currSpace = line.indentation();
 
     // Calculate the correct indentation level based on the current state and the line's text
-    let indentation = this.parser.indent(state, text.slice(currSpace));
+    let indentation = this.parser.indent(state, line.text!.slice(currSpace));
 
     // Calculates the difference b/w the calculated indentation and the current whitespace.
     let diff = indentation - currSpace;
@@ -1974,19 +1968,36 @@ export class AscendEditor {
 
       let i = task;
 
-      // Find the most recent valid state to start from
-      // Look back up to 50 lines to find a cached state
+      // Track minimum indentation for smarter state intialization
+      let minindent = this.lines[task].indentation();
+      let minline = task;
+
+      // Find the most recent valid state for smarter state initialization
       let state: any;
-      for (let i = task - 1; i >= Math.max(0, task - 50) && !state; i--) {
-        state = this.lines[i].stateAfter;
+
+      // Enhanced state search with indentation tracking
+      for (let e = Math.max(1, task - 50); task >= e; task--) {
+        const line = this.lines[task - 1];
+        const state = line.stateAfter;
+        const indent = line.indentation();
+
+        if (state) break; // Found a valid state, stop searching
+        // Keet track of line with minimum indentation
+        if (indent < minindent) {
+          minindent = indent;
+          minline = task;
+        }
       }
 
+      // Smart state initialization
       // Create new state if none found
       if (state) {
         state = copyState(state);
       } else {
         // Start with the initial parser state
         state = this.parser.startState(this.options);
+        // If no valid state found, start from line with minimum indentation
+        if (task) task = minline;
       }
 
       // Process lines until we run out of time or hit end of document.
@@ -1999,7 +2010,9 @@ export class AscendEditor {
         if (Number(new Date()) > end) {
           this.work.push(i);
           this.startWorker(this.options.workDelay);
-          break;
+          // Register changes immediately
+          this.changes.push({ from: task, to: i });
+          return;
         }
 
         // Highlight the current line and update its state
