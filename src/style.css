@@ -81,6 +81,14 @@ body {
   background: Highlight !important;
 }
 
+.ascend-editor-matching-bracket {
+  @apply bg-gray-300 font-bold;
+}
+
+.ascend-editor-non-matching-bracket {
+  @apply bg-red-400 font-bold;
+}
+
 .ascend-editor-gutter {
   @apply bg-gray-500 h-full border-r-1 border-gray-700 text-gray-100 text-right float-left -mt-[0.4em] mr-[0.4em]      
   -mb-[0.4em]      
