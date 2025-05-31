@@ -1,7 +1,5 @@
 import { StringStream } from "../../parsers/stringStream";
-import { textSpan } from "../../utils/dom";
 import { copyStyles, htmlEscape } from "../../utils/helpers";
-import type { Position } from "../../interfaces";
 
 /**
  * Represents a single line of code within the editor. Manages the display, selection and highlighting of text
@@ -23,12 +21,15 @@ export class Line {
   public selTo: number | null = null;
   // Stores the styles of the line.
   public styles: (string | null)[];
+  // Tracks text marks/highlights
+  public marked: { from: number; to: number; style: string }[] | null;
 
   constructor(text: string, styles?: (string | null)[]) {
     this.text = text;
     this.stateAfter = null;
 
     this.styles = styles || [text, null];
+    this.marked = null;
   }
 
   /**
@@ -44,6 +45,7 @@ export class Line {
    */
   replace(from: number, to: number, text: string) {
     let st: (string | null)[] = [];
+    let marked = this.marked;
 
     copyStyles(0, from, this.styles, st);
     if (text) st.push(text, null);
@@ -52,6 +54,41 @@ export class Line {
     this.styles = st;
     this.text = this.text?.slice(0, from) + text + this.text?.slice(to);
     this.stateAfter = null;
+
+    // Handle marks adjustment if there are any
+    if (marked) {
+      // Calculate the length difference b/e old and new text
+      let diff = text.length - (to - from);
+      let end = this.text.length;
+
+      // Helper function to adjust mark positions based on the change
+      function fix(n: number) {
+        return n <= Math.min(to, to + diff) ? n : n + diff;
+      }
+
+      // Iterate through all marks and adjust their positions
+      for (let i = 0; i < marked.length; i++) {
+        let mark = marked[i];
+        let del = false;
+
+        // Mark is beyond the end, should be deleted
+        if (mark.from >= end) {
+          del = true;
+        } else {
+          // Adjust mark start and end positions
+          mark.from = fix(mark.from);
+          if (mark.to != null) {
+            mark.to = fix(mark.to);
+          }
+        }
+
+        // Remove mark if it's flagged for deletion or became empty
+        if (del || mark.from >= mark.to) {
+          marked.splice(i, 1);
+          i--
+        }
+      }
+    }
   }
 
   /**
@@ -64,6 +101,75 @@ export class Line {
     let st = [textBefore, null];
     copyStyles(pos, this.text?.length!, this.styles, st);
     return new Line(textBefore + this.text?.slice(pos), st);
+  }
+
+  /**
+   * Adds Marks/Highlights to line segements
+   * @param from
+   * @param to
+   * @param style
+   */
+  addMark(from: number, to: number, style: string) {
+    if (this.marked == null) this.marked = [];
+    this.marked.push({ from: from, to: to, style: style });
+    this.marked.sort((a, b) => b.from - a.from);
+  }
+
+  /**
+   * Removes Marks/Highlights from line segments
+   * @param from
+   * @param to
+   * @param style
+   */
+  removeMark(from: number, to: number, style: string) {
+    if (to == null) {
+      to = this.text?.length!;
+    }
+
+    if (!this.marked) return;
+
+    // Iterate through marks and handle various cases:
+    // - Complete mark removal
+    // - Partial mark removal requiring split
+    // - Mark adjustment
+    for (let i = 0; i < this.marked.length; i++) {
+      let mark = this.marked[i];
+
+      // Skip marks that don't match the style if style is specified
+      if (style && mark.style != style) continue;
+
+      // Calculate the effective end position of the mark
+      let mto = mark.to == null ? this.text?.length : mark.to;
+      let del = false;
+
+      // Case 1: Mark is completely within removal range
+      if (mark.from >= from && mto! <= to) {
+        del = true;
+      }
+      // Case 2: Mark spans the removal range
+      else if (mark.from < from && mto! > to) {
+        // Split the mark into two parts
+        this.marked.splice(i++, 0, {
+          from: to, // Start new mark at removal end
+          to: mark.to, // Keep original end
+          style: mark.style, // Maintain same style
+        });
+        mark.to = from; // Truncate original work
+      }
+      // Case 3: Removal range starts within mark
+      else if (mto! > from && mark.from < from) {
+        mark.to = from; // Truncate mark at removal start
+      }
+      // Case 4: Removal range ends within mark
+      else if (mark.from < to && mto! > to) {
+        mark.from = to; // Start mark at removal end
+      }
+
+      // Remove mark if it's flagged for deletion or became empty
+      if (del || mark.from == mark.to) {
+        this.marked.splice(i--, 1); // Remove and adjust index
+      }
+    }
   }
 
   /**
@@ -100,94 +206,171 @@ export class Line {
   /**
    * Updates the DOM to reflect the current text content, styles, and selection.
    */
-  getHTML(sfrom: number, sto: number) {
-    const html: string[] = [];
-    const st = this.styles;
-    let pos = 0;
-    let sel = sfrom === null ? 2 : 0;
-
-    /**
-     * Adds a piece of text to the HTML, applying the correct style and handling selection.
-     * @param text
-     * @param style
-     */
-    function addPiece(text: string, style: string | null, last?: number): void {
-      let cls = style;
-
-      const len = text?.length; // Length of the text segment
-      let cut: number | undefined; // Position to cut the text segment if selection cuts through it.
-
-      // If currently inside selection
-      if (sel === 0) {
-        // Calculates the offset from the current position to the start of the selection.
-        const off = sfrom! - pos;
-
-        // If the offset is 0, the selection starts at the beginning of this span.
-        if (off === 0) {
-          // If from equals to, then set cursor position.
-          if (sfrom === sto) {
-            sel = 2;
-            // html.push('<span class="ascend-editor-cursor">\u200b</span>');
-          } else {
-            // Otherwise the selection starts at the span.
-            sel = 1;
-          }
-        }
-        // If the offset is within the current span, split the selection at the selection part.
-        else if (off <= len && off < len) {
-          cut = off;
-        }
-      }
-
-      // If we are inside the selection and have a selection end
-      if (sel === 1 && sto != null) {
-        // Calculate the position from the current position to the end of the selection.
-        const off = sto - pos;
-
-        // If the offset is 0, selection ends at the beginning of this span.
-        if (off === 0) {
-          sel = 2;
-        } else if (off < len) {
-          // If the offset is within the current span, then split the span at the selection end.
-          cut = off;
-        }
-      }
-
-      // Build the class string.
-      if (sel === 1) {
-        cls += " ascend-editor-selected"; // Add selection class.
-      }
-
-      // Open the span tag, add the class, text and close the span.
-      html.push(
-        "<span",
-        cls ? ' class="' + cls + '">' : ">",
-        htmlEscape(!cut ? text : text.slice(0, cut)),
-        "</span>"
+  getHTML(sfrom: number | null, sto: number) {
+    // If no marks and selection spans entire line, return simple highlighted span
+    if (!this.marked && sfrom === 0 && sto === null) {
+      return (
+        '<span class="ascend-editor-selected">' +
+        htmlEscape(this.text!) +
+        " </span>"
       );
+    }
 
-      pos += cut || len;
+    let html: string[] = []; // Array to store HTML output
+    let st = this.styles; // Array of text chunks and their styles
+    let allText = this.text; // Full text content of the line
+    let marked = this.marked; // Array of marked ranges
 
-      if (cut) {
-        // Recursively add the rest of the text.
-        addPiece(text.slice(cut), style, last);
+    // Wraps text in a styled span element if style is provided
+    function span(text: string, style?: string) {
+      if (!text) return;
+      if (style) {
+        html.push(`<span class=${style}>${htmlEscape(text)}</span>`);
+      } else {
+        html.push(text);
       }
     }
 
-    for (let i = 0; i < st.length; i += 2) {
-      addPiece(st[i] as string, st[i + 1]);
+    // Normalize selection range
+    if (sfrom == sto) sfrom = null;
+
+    // Case 1: Handle empty lines with a space to maintain height
+    if (!allText) {
+      span(" ");
     }
-
-    const empty = html.length == 0;
-
-    // Handle the case of an open-ended selection.
-    if (sel === 1 && sto == null) {
-      html.push('<span class="ascend-editor-selected"> </span>');
-    } else if (empty) {
-      addPiece(" ", "");
+    // Case 2: No markers and no selection - just style chunks
+    else if (!marked && sfrom == null) {
+      for (let i = 0; i < st.length; i += 2) {
+        span(st[i]!, st[i + 1]!);
+      }
     }
+    // Case 3: Has marks or selection - requires careful segment handling
+    else {
+      let pos = 0;      // Current position in text
+      let i = 0;        // Current index in styles array
+      let text = "";    // Current text chunk being processed
+      let style = null; // Current style being applied
 
-    // Set the inner HTML of the div with the generated HTML.
-    return html.join("");
+      /**
+       * Copies and styles text up to target position
+       * Handles splitting of text chunks at arbitrary positions
+       * @param end - Target position to copy until
+       */
+      function copyUntil(end: number) {
+        while (true) {
+          let upto = pos + text.length;
+
+          // Split chunk if necessary and apply style
+          span(upto > end ? text.slice(0, end - pos) : text, style!)
+          if (upto >= end) {
+            text = text.slice(end - pos)
+            pos = end
+            break
+          }
+          pos = upto
+          text = st[i++]!
+          style = st[i++]
+        }
+      }
+
+
+      /**
+       * Accumulates and styles text chunks up to target position
+       * Used for maintaining style boundaries
+       * @param end - Target position to accumulate until
+       * @param cStyle - Style to apply to accumulated text
+       */
+      function chunkUntil(end: number, cStyle: string) {
+        let acc = []
+
+        while (true) {
+          let upto = pos + text.length
+
+          if (upto >= end) {
+            let size = end - pos
+            acc.push(text.slice(0, size))
+            span(acc.join(""), cStyle)
+            text = text.slice(size)
+            pos += size
+            break
+          }
+
+          acc.push(text)
+          pos = upto
+          text = st[i++]!
+          style = st[i++]
+        }
+      }
+
+      let markPos = 0
+      let mark: { from: number; to: number, style?: string } = { from: 0, to: 0 }
+
+      /**
+       * Locates next marker that affects current position
+       * @returns Starting position of next relevant marker
+       */
+      function nextMark() {
+        if (!marked) return null
+
+        while (markPos < marked.length) {
+          mark = marked[markPos]
+          let end = mark.to == null ? allText?.length : mark.to
+
+          if (end! > pos) {
+            return Math.max(mark.from, pos)
+          }
+
+          markPos++
+        }
+      }
+
+      // Main rendering loop - processes text segments with proper styling
+      while (pos < allText.length) {
+        // Get next marker position that affects current position in text
+        let nextmark = nextMark()
+
+        // Case 1: SELECTION RANGE HANDLING
+        // If we're at selection start and either no markers exists or selection starts before next marker
+        if (sfrom != null && sfrom >= pos && (nextmark == null || sfrom <= nextmark)) {
+          // Copy text up to selection start with current styling
+          copyUntil(sfrom)
+
+          // If selection extends to end of line
+          if (sto == null) {
+            // Add remaining text with selection styling and exit loop
+            span(allText.slice(pos) + " ", "ascend-editor-selected")
+            break
+          }
+
+          // Otherwise style the selected range
+          chunkUntil(sto, "ascend-editor-selected")
+        }
+        // Case 2: MARKED RANGE HANDLING
+        // If we have a marker starting at current position
+        else if (nextmark != null) {
+          // Copy text up to marker start with current styling
+          copyUntil(nextmark)
+
+          // Calculate marker end position (end of line if not specified)
+          let end = mark.to == null ? allText.length : mark.to
+
+          // Apply marker styling up either:
+          // 1. Marker end if no selection or selection has'nt started
+          // Selection start if it occurs before marker end
+          chunkUntil(sfrom == null || sfrom < pos ? end : Math.min(sfrom, end), mark.style!)
+        }
+
+        // Case 3: DEFAULT HANDLING
+        // No markers or selection affecting current position
+        else {
+
+          // Copy remaining text with currenrt styling
+          copyUntil(allText.length)
+        }
+      }
+
+
+    }
+    return html.join("")
   }
 }

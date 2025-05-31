@@ -2005,10 +2005,59 @@ export class AscendEditor {
     }
   }
 
+  /**
+   * Helper function to handle text marking operations in the editor.
+   * Used internally by both markText() and unmarkText() methods.
+   *
+   * Handles both single-line and multi-line text marking operations.
+   * Clips positions to ensure they are within document boundaries.
+   * Records changes for display updating.
+   *
+   * @param from - Starting position with line and character offset
+   * @param to - Ending position with line and character offset
+   * @param func - The marking function to apply (either addMark or removeMark)
+   * @param className - CSS class name to be applied to the marked text
+   */
+  markHelper(from: Position, to: Position, func: Function, className: string) {
+    // Ensure positions are valid by clipping them to document boundaries
+    from = this.clipPosition(from);
+    to = this.clipPosition(to);
+
+    // If marking is within a single line
+    if (from.line == to.line) {
+      // Apply the marking function directly with start and end character positions
+      func.call(this.lines[from.line], from.ch, to.ch, className);
+    }
+    // If marking spans multiple spans
+    else {
+      // Mark the first line from start position to end of line
+      func.call(this.lines[from.line], from.ch, null, className);
+
+      // Mark all complete lines in between from and to positions
+      for (let i = from.line + 1; i < to.line; i++) {
+        func.call(this.lines[i], 0, null, className);
+      }
+
+      // Mark the last line from start to end position
+      func.call(this.lines[to.line], 0, to.ch, className);
+    }
+
+    // Record the change for updating display
+    this.changes.push({ from: from.line, to: to.line + 1 });
+  }
+
   // Start the background highlighting worker
   startWorker(time: number) {
     if (!this.work.length) return;
     this.highlight.set(time, this.operation(this.highlightWorker));
+  }
+
+  markText(from: Position, to: Position, className: string) {
+    this.markHelper(from, to, Line.prototype.addMark, className);
+  }
+
+  unmarkText(from: Position, to: Position, className: string) {
+    this.markHelper(from, to, Line.prototype.removeMark, className);
   }
 
   /**
@@ -2228,6 +2277,9 @@ export class AscendEditor {
       operation: (f: Function) => this.operation(f)(),
 
       refresh: () => this.updateDisplay([{ from: 0, to: this.lines.length }]),
+
+      markText: this.operation(this.markText),
+      unmarkText: this.operation(this.unmarkText),
 
       // Direct access to editor instance (if needed)
       getEditor: () => self,
