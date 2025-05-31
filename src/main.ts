@@ -79,6 +79,10 @@ export class AscendEditor {
   highlightTimeout: number | null = null;
   history: History | null;
 
+  // Tracks currently highlighted brackets
+  // Stores cleanup function to remove bracket highlighting
+  bracketHighlighted: (() => any) | null = null;
+
   public static defaults: { [key: string]: any } = {
     value: "",
     indentUnit: 2,
@@ -2083,7 +2087,7 @@ export class AscendEditor {
         mark.line!.removeMark(mark);
 
         // If line still exists in editor, Update the affected range tracking
-        if (found != null) {
+        if (found > -1) {
           // Init start position if this is first found line
           if (start == null) {
             start = found;
@@ -2258,13 +2262,10 @@ export class AscendEditor {
 
         // AUTO-CLEAR HIGHLIGHTING
         // Remove highlighting after 800ms using operation wrapper
-        setTimeout(
-          this.operation(() => {
-            one();
-            two();
-          }),
-          800
-        );
+        this.bracketHighlighted = this.operation(() => {
+          one();
+          two();
+        });
 
         break; // Exit search loop after finding match
       }
@@ -2377,8 +2378,21 @@ export class AscendEditor {
       this.options.onChange(AscendEditor);
     }
 
+    // Enhanced bracket matching logic to clean up previous highlights before applying new ones
     if (this.selectionChanged && this.options.autoMatchBrackets) {
-      setTimeout(this.operation(this.matchBrackets), 20);
+      setTimeout(
+        this.operation(() => {
+          // Clear any existing bracket highlighting
+          if (this.bracketHighlighted) {
+            this.bracketHighlighted();
+            this.bracketHighlighted = null;
+          }
+
+          // Apply new bracket matching
+          this.matchBrackets();
+        }),
+        20
+      );
     }
   }
 
