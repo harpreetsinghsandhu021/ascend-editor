@@ -27,6 +27,7 @@ export class Line {
   constructor(text: string, styles?: (string | null)[]) {
     this.text = text;
     this.stateAfter = null;
+
     this.styles = styles || [text, null];
   }
 
@@ -43,10 +44,11 @@ export class Line {
    */
   replace(from: number, to: number, text: string) {
     let st: (string | null)[] = [];
+
     copyStyles(0, from, this.styles, st);
     if (text) st.push(text, null);
-
     copyStyles(to, this.text?.length!, this.styles, st);
+
     this.styles = st;
     this.text = this.text?.slice(0, from) + text + this.text?.slice(to);
     this.stateAfter = null;
@@ -176,7 +178,7 @@ export class Line {
       addPiece(st[i] as string, st[i + 1]);
     }
 
-    const empty = true;
+    const empty = html.length == 0;
 
     // Handle the case of an open-ended selection.
     if (sel === 1 && sto == null) {

@@ -418,6 +418,7 @@ export class AscendEditor {
         let lastLine = firstLine.split(to.ch, newText[newText.length - 1]);
         // Prepare arguments for splice.
         let spliceArgs: Line[] = [];
+
         // Replace the start of the line.
         firstLine.replace(from.ch, firstLine.text?.length!, newText[0]);
 
@@ -879,7 +880,7 @@ export class AscendEditor {
 
       // Calculate the character where change begins. If we found newlines, measure from last newline
       // Otherwise measure from start of text.
-      let ch = newLine > 1 ? start - newLine : start;
+      let ch = newLine > -1 ? start - newLine : start;
       let endLine = this.editing.to - 1;
 
       // Find common suffix by working backwards
