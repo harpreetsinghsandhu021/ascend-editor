@@ -177,6 +177,8 @@ export class AscendEditor {
     });
 
     connect(code, "scroll", () => this.updateDisplay());
+    connect(window, "resize", () => this.updateDisplay());
+
     connect(code, "dblclick", this.operation(this.onDblClick));
 
     connect(code, "dragover", function (e) {
@@ -261,6 +263,9 @@ export class AscendEditor {
 
     // If the button pressed is not the left mouse button, return
     if (e.button() != 1) return;
+
+    if (!this.focused) this.onFocus();
+
     // Prevent the default event behavior
     e.stop();
 
@@ -308,11 +313,7 @@ export class AscendEditor {
     // Perform necessary cleanup after the selection is made
     function end() {
       // If the editor does`nt have focus, focus it and prepare the input
-      if (!self.focused) {
-        self.input.focus();
-        self.onFocus();
-        self.prepareInputArea();
-      }
+      self.input.focus();
 
       self.updateInput = true;
 
@@ -896,13 +897,13 @@ export class AscendEditor {
           endLine--;
         }
 
-        if (edEnd <= start || end <= start) {
-          break;
-        }
-
         if (text.charAt(end) !== c) {
           end++;
           edEnd++;
+          break;
+        }
+
+        if (edEnd <= start || end <= start) {
           break;
         }
 
@@ -1010,6 +1011,7 @@ export class AscendEditor {
    *                - diff: Line count difference after the change
    */
   updateDisplay(changes?: { from: number; to: number; diff?: number }[]) {
+    if (!this.code.clientWidth) return;
     // Get line height and calculate visible line range
     let lh = this.lineHeight();
 
@@ -1263,7 +1265,8 @@ export class AscendEditor {
 
       if (extra) {
         // Get reference node for insertion/deletion
-        let nodeAfter = this.lineDiv.childNodes[rec.at + off + rec.size];
+        let nodeAfter =
+          this.lineDiv.childNodes[rec.at + off + rec.size] || null;
 
         // Remove nodes if region shrank
         for (let j = Math.max(0, -extra); j > 0; j--) {
@@ -2224,6 +2227,8 @@ export class AscendEditor {
       // Operation wrapper
       operation: (f: Function) => this.operation(f)(),
 
+      refresh: () => this.updateDisplay([{ from: 0, to: this.lines.length }]),
+
       // Direct access to editor instance (if needed)
       getEditor: () => self,
     };
@@ -2241,6 +2246,11 @@ export class AscendEditor {
   }
 
   lineHeight() {
+    let nLines = this.lineDiv.childNodes.length;
+    if (nLines) {
+      return this.lineDiv.offsetHeight / nLines;
+    }
+
     return this.measure.offsetHeight || 1;
   }
 

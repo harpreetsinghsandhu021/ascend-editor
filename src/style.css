@@ -73,12 +73,12 @@ body {
 }
 
 .ascend-editor-selected {
-  background-color: #bbb !important;
-  color: #fff !important;
+  background-color: #ccc !important;
+  color: HighlightText !important;
 }
 
 .ascend-editor-focused .ascend-editor-selected {
-  background: #88f !important;
+  background: Highlight !important;
 }
 
 .ascend-editor-gutter {
