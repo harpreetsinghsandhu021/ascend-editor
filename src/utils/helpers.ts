@@ -14,6 +14,15 @@ for (let i = 35; i <= 40; i++) {
   movementKeys[i] = movementKeys[`c${i}`] = true;
 }
 
+export const matching: { [key: string]: string } = {
+  "(": ")>",
+  ")": "(<",
+  "[": "]>",
+  "]": "[<",
+  "{": "}>",
+  "}": "{<",
+};
+
 export function eltOffset(node: HTMLElement): Offset {
   let x = 0;
   let y = 0;

@@ -7,6 +7,7 @@ import {
   editEnd,
   eltOffset,
   keyCodeMap,
+  matching,
   movementKeys,
   positionEqual,
   positionLess,
@@ -91,6 +92,7 @@ export class AscendEditor {
     undoDepth: 40,
     readOnly: false,
     tabIndex: null,
+    autoMatchBrackets: false,
   };
   options: { [key: string]: any } = {};
 
@@ -2006,58 +2008,275 @@ export class AscendEditor {
   }
 
   /**
-   * Helper function to handle text marking operations in the editor.
-   * Used internally by both markText() and unmarkText() methods.
+   * Applies text marking/highlighting to a range of text in the editor.
+   * Creates persistent markers that survive edits and can be removed later.
    *
-   * Handles both single-line and multi-line text marking operations.
-   * Clips positions to ensure they are within document boundaries.
-   * Records changes for display updating.
-   *
-   * @param from - Starting position with line and character offset
-   * @param to - Ending position with line and character offset
-   * @param func - The marking function to apply (either addMark or removeMark)
+   * @param from - Starting position where marking begins
+   * @param to - Ending position where marking ends
    * @param className - CSS class name to be applied to the marked text
    */
-  markHelper(from: Position, to: Position, func: Function, className: string) {
-    // Ensure positions are valid by clipping them to document boundaries
+  markText(from: Position, to: Position, className: string) {
+    // Clip positions to ensure they are within valid bounds
     from = this.clipPosition(from);
     to = this.clipPosition(to);
 
-    // If marking is within a single line
-    if (from.line == to.line) {
-      // Apply the marking function directly with start and end character positions
-      func.call(this.lines[from.line], from.ch, to.ch, className);
-    }
-    // If marking spans multiple spans
-    else {
-      // Mark the first line from start position to end of line
-      func.call(this.lines[from.line], from.ch, null, className);
+    let accum: { from: number; to: number; style: string; line?: Line }[] = []; // Array to accumulate all mark objects created
 
-      // Mark all complete lines in between from and to positions
+    /**
+     * Helper function to create and track marks on a single line
+     *
+     * @param line - Line number to mark
+     * @param from - Starting char position
+     * @param to - Ending char position
+     * @param className - CSS class to apply
+     */
+    const add = (
+      lineNo: number,
+      from: number,
+      to: number | null,
+      className: string
+    ) => {
+      // Get line object and create mark
+      let line = this.lines[lineNo];
+      let mark = line.addMark(from, to!, className);
+      mark.line = line;
+
+      accum.push(mark);
+    };
+
+    // CASE 1: Single-line marking
+    if (from.line == to.line) {
+      add(from.line, from.ch, to.ch, className);
+    }
+    // CASE 2: Multi-line marking
+    else {
+      // Mark partial first line (from.ch to end)
+      add(from.line, from.ch, null, className);
+
       for (let i = from.line + 1; i < to.line; i++) {
-        func.call(this.lines[i], 0, null, className);
+        add(i, 0, null, className);
       }
 
-      // Mark the last line from start to end position
-      func.call(this.lines[to.line], 0, to.ch, className);
+      // Mark partial last line (0 to to.ch)
+      add(to.line, 0, to.ch, className);
     }
 
-    // Record the change for updating display
+    // Register change for editor update
     this.changes.push({ from: from.line, to: to.line + 1 });
+
+    /**
+     * Cleanup function that removes all created marks. Returns a function to allow deferred cleanup.
+     * Critical for memory management and maintaining editor state.
+     */
+    return () => {
+      // Track the range of lines affected by mark removal
+      let start: number | null = null; // First line number that had marks removed
+      let end: number = 0; // Last line number that had marks removed
+
+      // Iterate through all accumulated marks
+      for (let i = 0; i < accum.length; i++) {
+        let mark = accum[i];
+        // Find the current position of the line containing this mark. Critical because line number may have changed due to edits.
+        let found = this.lines.indexOf(mark.line!);
+
+        // Remove the mark from its containing line. This updates internal line state and styling.
+        mark.line!.removeMark(mark);
+
+        // If line still exists in editor, Update the affected range tracking
+        if (found != null) {
+          // Init start position if this is first found line
+          if (start == null) {
+            start = found;
+          }
+          // Always update end to latest found line. This ensures we capture the full range.
+          end = found;
+        }
+      }
+
+      // If any lines were affected, Push a change notification for the range
+      if (start != null) {
+        this.changes.push({ from: start, to: end + 1 });
+      }
+    };
+  }
+
+  /**
+   * Handles bracket matching and highlighting in the editor.
+   *
+   * Implements a sophisticated bracket matching algorithmn that works across multiple lines and handles
+   * nested brackets while respecting syntax highlighting.
+   */
+  matchBrackets() {
+    // Get current cursor position and line
+    let head = this.selection.inverted
+      ? this.selection.from
+      : this.selection.to;
+    let line = this.lines[head.line];
+    let pos = head.ch - 1;
+
+    // Find matching bracket character at or adjacent to cursor
+    let match =
+      (pos >= 0 && matching[line.text?.charAt(pos) as string]) ||
+      matching[line.text?.charAt(pos++) as string];
+
+    if (!match) return;
+
+    // Extract matching info and determine search direction
+    let ch = match.charAt(0); // The bracket character to match
+    let forward = match.charAt(1) == ">"; // True if searching forward, false if backward
+    let d = forward ? 1 : -1; // Direction multiplier for array traversal
+    let st = line.styles; // Current line's syntax styling
+    let style: string | null = "";
+
+    // Find the style at cursor position for syntax-aware matching
+    let offset = forward ? pos + 1 : pos;
+    for (let i = 0; i < st.length; i += 2) {
+      offset -= st[i]?.length!;
+      if (offset <= 0) {
+        style = st[i + 1];
+        break;
+      }
+    }
+
+    // Initialize bracket stack and regex for bracket detection
+    const stack = [line.text?.charAt(pos)]; // Stack to track nested brackets
+    const regex = /[(){}[\]]/; // Regex to identify bracket characters
+
+    /**
+     * Scans a line for matching brackets
+     * @param line - Line object to scan
+     * @param from - Starting position in the line
+     * @param to - Ending position in line
+     * @returns Match information if found
+     */
+    const scan = (line: Line, from: number, to: number) => {
+      if (!line.text) return;
+
+      // Init position based on search direction
+      let st = line.styles;
+      let pos = forward ? 0 : line.text.length - 1;
+      let curr;
+
+      // OUTER LOOP: Iterate through style segments
+      let end = forward ? st.length : -2;
+      console.log(i, end);
+
+      for (let i = forward ? 0 : st.length - 2; i != end; i += 2 * d) {
+        // Continue until we reach the end
+        let text = st[i]; // Current text chunk
+
+        // STYLE VALIDATION:
+        // Skip this chunk if it has a different syntax style than our starting bracket
+        // This prevents matching brackets across different syntax contexts (string, comments)
+        if (st[i + 1] != null && st[i + 1] != style) {
+          pos += d * text?.length!; // Adjust position by chunk length
+          continue;
+        }
+
+        // INNER LOOP: Scan individual characters within the style segment
+        let j = forward ? 0 : text?.length! - 1; // Start of chunk or end based on direction
+        let end = forward ? text?.length : -1;
+        // End position to scan to, Continue until chunk fully scanned
+        while (j != end) {
+          // BRACKET DETECTION:
+          // Check if current position is:
+          // 1. Within the requested range (from/to)
+          // 2. Contains a bracket character
+          if (
+            from <= pos &&
+            pos < to &&
+            regex.test((curr = text?.charAt(j)!))
+          ) {
+            let match = matching[curr]; // Get the matching bracket info
+
+            // BRACKET PROCESSING:
+            if ((match.charAt(1) == ">") == forward) {
+              // OPENING BRACKET
+              // Found an opening bracket in our search direction
+              stack.push(curr);
+            } else {
+              // CLOSING BRACKET
+              // Found a closing bracket, check if it matches
+              if (stack.pop() != match.charAt(0)) {
+                return { pos: pos, match: false };
+              } else if (!stack.length) {
+                // Perfect match found - empty stack means all brackets closed
+                return { pos: pos, match: true };
+              }
+            }
+          }
+          j += d; // Move one char forward/backward
+          pos += d; // Track absolute position in line
+        }
+      }
+    };
+
+    // BRACKET SEARCH LOOP
+    // Search for matching brackets within a 30-line window in either direction
+
+    let i = head.line;
+    let end = forward
+      ? Math.min(i + 30, this.lines.length)
+      : Math.max(0, i - 30);
+
+    while (i != end) {
+      // Get current line and check if it's the starting line
+      let line = this.lines[i];
+      let first = i == head.line;
+
+      // SCAN CURRENT LINE
+      // Parameters vary based on direction and if it's first line:
+      // - Forward on first line: start after current position
+      // - Backward on first line: scan only up to current position
+      // - Other lines: scan entire line
+      let found = scan(
+        line,
+        first && forward ? pos + 1 : 0,
+        first && !forward ? pos : line.text?.length!
+      );
+
+      // HANDLE FOUND BRACKETS
+      if (found) {
+        // Determine style based on whether brackets match
+        let style = found?.match
+          ? "ascend-editor-matching-bracket" // Matching pair
+          : "ascend-editor-non-matching-bracket"; // Non-matching pair
+
+        // HANDLE BOTH BRACKETS
+        //  Mark both the original and matching/non-matching bracket
+        let one = this.markText(
+          { line: head.line, ch: pos },
+          { line: head.line, ch: pos + 1 },
+          style
+        );
+
+        let two = this.markText(
+          { line: i, ch: found.pos },
+          { line: i, ch: found.pos + 1 },
+          style
+        );
+
+        // AUTO-CLEAR HIGHLIGHTING
+        // Remove highlighting after 800ms using operation wrapper
+        setTimeout(
+          this.operation(() => {
+            one();
+            two();
+          }),
+          800
+        );
+
+        break; // Exit search loop after finding match
+      }
+
+      i += d;
+    }
   }
 
   // Start the background highlighting worker
   startWorker(time: number) {
     if (!this.work.length) return;
     this.highlight.set(time, this.operation(this.highlightWorker));
-  }
-
-  markText(from: Position, to: Position, className: string) {
-    this.markHelper(from, to, Line.prototype.addMark, className);
-  }
-
-  unmarkText(from: Position, to: Position, className: string) {
-    this.markHelper(from, to, Line.prototype.removeMark, className);
   }
 
   /**
@@ -2156,6 +2375,10 @@ export class AscendEditor {
     }
     if (this.textChanged && this.options.onChange) {
       this.options.onChange(AscendEditor);
+    }
+
+    if (this.selectionChanged && this.options.autoMatchBrackets) {
+      setTimeout(this.operation(this.matchBrackets), 20);
     }
   }
 
@@ -2278,8 +2501,11 @@ export class AscendEditor {
 
       refresh: () => this.updateDisplay([{ from: 0, to: this.lines.length }]),
 
-      markText: this.operation(this.markText),
-      unmarkText: this.operation(this.unmarkText),
+      markText: this.operation((a: Position, b: Position, c: string) =>
+        this.operation(this.markText(a, b, c))
+      ),
+
+      matchBrackets: this.operation(this.matchBrackets),
 
       // Direct access to editor instance (if needed)
       getEditor: () => self,
@@ -2391,5 +2617,5 @@ AscendEditor.fromTextArea = function (textarea, options) {
 
 const editor = AscendEditor.fromTextArea(
   document.getElementById("code") as HTMLTextAreaElement,
-  { lineNumbers: true }
+  { lineNumbers: true, autoMatchBrackets: true }
 );

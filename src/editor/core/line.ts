@@ -1,3 +1,4 @@
+import type { Position } from "../../interfaces";
 import { StringStream } from "../../parsers/stringStream";
 import { copyStyles, htmlEscape } from "../../utils/helpers";
 
@@ -110,9 +111,11 @@ export class Line {
    * @param style
    */
   addMark(from: number, to: number, style: string) {
+    let mark: { from: number; to: number; style: string, line?: Line } = { from: from, to: to, style: style }
     if (this.marked == null) this.marked = [];
-    this.marked.push({ from: from, to: to, style: style });
-    this.marked.sort((a, b) => b.from - a.from);
+    this.marked.push(mark);
+    this.marked.sort((a, b) => a.from - b.from);
+    return mark
   }
 
   /**
@@ -121,53 +124,13 @@ export class Line {
    * @param to
    * @param style
    */
-  removeMark(from: number, to: number, style: string) {
-    if (to == null) {
-      to = this.text?.length!;
-    }
-
+  removeMark(mark: { from: number, to: number, style: string }) {
     if (!this.marked) return;
 
-    // Iterate through marks and handle various cases:
-    // - Complete mark removal
-    // - Partial mark removal requiring split
-    // - Mark adjustment
     for (let i = 0; i < this.marked.length; i++) {
-      let mark = this.marked[i];
-
-      // Skip marks that don't match the style if style is specified
-      if (style && mark.style != style) continue;
-
-      // Calculate the effective end position of the mark
-      let mto = mark.to == null ? this.text?.length : mark.to;
-      let del = false;
-
-      // Case 1: Mark is completely within removal range
-      if (mark.from >= from && mto! <= to) {
-        del = true;
-      }
-      // Case 2: Mark spans the removal range
-      else if (mark.from < from && mto! > to) {
-        // Split the mark into two parts
-        this.marked.splice(i++, 0, {
-          from: to, // Start new mark at removal end
-          to: mark.to, // Keep original end
-          style: mark.style, // Maintain same style
-        });
-        mark.to = from; // Truncate original work
-      }
-      // Case 3: Removal range starts within mark
-      else if (mto! > from && mark.from < from) {
-        mark.to = from; // Truncate mark at removal start
-      }
-      // Case 4: Removal range ends within mark
-      else if (mark.from < to && mto! > to) {
-        mark.from = to; // Start mark at removal end
-      }
-
-      // Remove mark if it's flagged for deletion or became empty
-      if (del || mark.from == mark.to) {
-        this.marked.splice(i--, 1); // Remove and adjust index
+      if (this.marked[i] == mark) {
+        this.marked.splice(i, 1)
+        break
       }
     }
   }
