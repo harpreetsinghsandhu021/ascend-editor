@@ -583,20 +583,67 @@ export class AscendEditor {
     this.unredoHelper(this.history?.undone!, this.history?.done!);
   }
 
+  /**
+   * Handles file and text drag-and-drop operations in the editor
+   * Supports both single/multiple file drops and plain text drops
+   *
+   * @param e - AsEvent Object
+   */
   onDrop(e: AsEvent) {
-    let text: string;
-    try {
-      text = (e.e as DragEvent).dataTransfer?.getData("Text") || "";
-    } catch (e) {
-      text = "";
+    const event = e.e as DragEvent;
+
+    // Get drop position and file data
+    const pos = this.posFromMouse(e);
+    const files = event.dataTransfer?.files;
+
+    // Exit if invalid drop position or editor is read-only
+    if (!pos || this.options.readOnly) return;
+
+    // CASE 1: File Drop Handling
+    if (files && files.length && window.FileReader && window.File) {
+      /**
+       * Reads content of a single dropped file
+       */
+      const loadFile = (file: File, i: number) => {
+        const reader = new FileReader();
+
+        reader.onload = () => {
+          // Store file content
+          text[i] = reader.result as string;
+
+          // Check if all files have been read
+          if (read++ == n) {
+            // Insert all file contents at drop position
+            this.replaceRange(
+              text.join(""), // Concat all file contents
+              this.clipPosition(pos),
+              this.clipPosition(pos)
+            );
+          }
+        };
+
+        reader.readAsText(file);
+      };
+      // Set up file reading infrastructure
+      const n = files.length;
+      const text = Array<string>(0); // Buffer of file contents
+      let read = 0; // Counter for completed reads
+
+      // Process each dropped file
+      for (let i = 0; i < n; i++) {
+        loadFile(files[i], i);
+      }
     }
+    // CASE 2: Text Drop Handling
+    else {
+      try {
+        const text = event.dataTransfer?.getData("Text");
 
-    if (!text || this.options.readOnly) return;
-
-    const pos = this.clipPosition(this.posFromMouse(e)!);
-    this.setSelection(pos, pos);
-
-    this.replaceSelection(text);
+        if (text) {
+          this.replaceRange(text, pos, pos);
+        }
+      } catch (err) {}
+    }
   }
 
   onKeyUp(e: AsEvent) {
@@ -1337,20 +1384,36 @@ export class AscendEditor {
     //     this.code.clientHeight - 2 * (this.space as HTMLElement).offsetTop
     //   ) + "px";
 
-    let html = [];
+    let html: string[] = [];
 
+    // Enhanced line number rendering with improved alignment:
+    // - Handles padding for consistent line number width
+    // - More efficient generation of line number HTML
+    // - Better visual alignment of line numbers
     if (this.options.lineNumbers) {
-      for (let i = this.showingFrom; i < this.showingTo; i++) {
-        html.push("<div>" + (i + 1) + "</div>");
+      let first = String(this.showingFrom + 1); // Get the first line number as string
+      let last = String(this.lines.length); // Get the total number of lines for width calculation
+
+      // Add left-padding to aling all line numbers
+      // Uses non-breaking space (\u00a0) to preserve spacing
+      while (first.length < last.length) {
+        first = "\u00a0" + first;
       }
 
-      this.gutter.style.display = "none";
-      this.gutter.innerHTML = html.join("");
-      this.gutter.style.display = "";
+      // Add the first line number with proper padding
+      html.push("<div>" + first + "</div>");
 
-      (this.lineDiv.parentNode as HTMLElement).style.marginLeft =
-        this.gutter.offsetWidth + "px";
+      // Generate remaining line numbers
+      for (let i = this.showingFrom + 1; i < this.showingTo; i++) {
+        html.push("<div>" + (i + 1) + "</div>");
+      }
     }
+    this.gutter.style.display = "none";
+    this.gutter.innerHTML = html.join("");
+    this.gutter.style.display = "";
+
+    (this.lineDiv.parentNode as HTMLElement).style.marginLeft =
+      this.gutter.offsetWidth + "px";
   }
 
   restartBlink() {
@@ -2176,7 +2239,6 @@ export class AscendEditor {
 
       // OUTER LOOP: Iterate through style segments
       let end = forward ? st.length : -2;
-      console.log(i, end);
 
       for (let i = forward ? 0 : st.length - 2; i != end; i += 2 * d) {
         // Continue until we reach the end
